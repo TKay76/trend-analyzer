@@ -1,12 +1,17 @@
 # tiktok_music_scraper.py (modified for database integration)
 
 import json
+import time
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.database import database_manager as db
+from src.utils.logger_config import get_logger, log_scraper_start, log_scraper_end, log_database_operation, log_error_with_context
+
+# 로거 설정
+logger = get_logger(__name__)
 
 def parse_track_data(track_string):
     """
@@ -55,7 +60,7 @@ def scrape_tab_data(page, tab_name):
     scraped_data = []
     seen_tracks = set() # To avoid duplicate entries if "View More" loads existing items
 
-    print(f"Scraping data from '{tab_name}' tab...")
+    logger.info(f"📊 '{tab_name}' 탭 데이터 스크래핑 시작...")
 
     while True:
         # Scroll to the bottom of the page to load more content
@@ -65,8 +70,8 @@ def scrape_tab_data(page, tab_name):
         # Wait for the music list items to be present
         try:
             page.wait_for_selector("div.ItemCard_soundItemContainer__GUmFb", timeout=10000)
-        except Exception:
-            print(f"No music items found on '{tab_name}' tab or timeout exceeded.")
+        except Exception as e:
+            logger.warning(f"⚠️ '{tab_name}' 탭에서 음악 항목을 찾을 수 없거나 타임아웃 발생: {e}")
             break
 
         html_content = page.content()
@@ -107,20 +112,21 @@ def scrape_tab_data(page, tab_name):
                 new_items_found = True
 
         if len(scraped_data) == current_scraped_count and not page.query_selector("button.view-more-button"):
-            print(f"No new items found after scrolling on '{tab_name}' tab. Assuming end of list.")
+            logger.info(f"📄 '{tab_name}' 탭에서 새로운 항목이 없음. 리스트 끝으로 판단.")
             break
 
         view_more_button_selector = "text=\"View More\""
         view_more_button = page.query_selector(view_more_button_selector)
 
         if view_more_button and view_more_button.is_visible() and view_more_button.is_enabled():
-            print(f"Clicking 'View More' on '{tab_name}' tab...")
+            logger.debug(f"🔄 '{tab_name}' 탭에서 'View More' 버튼 클릭...")
             view_more_button.click()
             page.wait_for_timeout(2000)
         else:
-            print(f"No more 'View More' button or it's not clickable on '{tab_name}' tab.")
+            logger.debug(f"🔚 '{tab_name}' 탭에서 더 이상 'View More' 버튼 없음.")
             break
 
+    logger.info(f"✅ '{tab_name}' 탭 스크래핑 완료: {len(scraped_data)}개 항목")
     return scraped_data
 
 def scrape_tiktok_creative_center():
@@ -129,67 +135,79 @@ def scrape_tiktok_creative_center():
         "breakout": []
     }
     target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/music/pc/en"
+    start_time = time.time()
+    
+    log_scraper_start(logger, "TikTok Creative Center 스크래퍼", target_url)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
         try:
-            print(f"Navigating to {target_url}...")
+            logger.info(f"🌐 페이지 로딩 중: {target_url}")
             page.goto(target_url, wait_until="networkidle")
             page.wait_for_timeout(10000)
-            print("Page loaded. Attempting to scrape data.")
+            logger.info("✅ 페이지 로딩 완료. 데이터 스크래핑 시작.")
 
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(2000)
 
             breakout_tab_selector = "span.ContentTab_itemLabelText__hiCCd:has-text(\"Breakout\")"
             try:
-                print("Clicking 'Breakout' tab...")
+                logger.info("🔄 'Breakout' 탭 클릭 중...")
                 page.wait_for_selector(breakout_tab_selector, timeout=10000)
                 page.locator(breakout_tab_selector).click(timeout=10000)
                 page.wait_for_selector("div.ItemCard_soundItemContainer__GUmFb", timeout=30000)
                 all_music_data["breakout"] = scrape_tab_data(page, "Breakout")
             except Exception as e:
-                print(f"Could not click Breakout tab or scrape: {e}")
+                log_error_with_context(logger, e, "Breakout 탭 처리")
 
             popular_tab_selector = "span.ContentTab_itemLabelText__hiCCd:has-text(\"Popular\")"
             try:
-                print("\nClicking 'Popular' tab...")
+                logger.info("🔄 'Popular' 탭 클릭 중...")
                 page.wait_for_selector(popular_tab_selector, timeout=10000)
                 page.locator(popular_tab_selector).click(timeout=10000)
                 page.wait_for_selector("div.ItemCard_soundItemContainer__GUmFb", timeout=30000)
                 all_music_data["popular"] = scrape_tab_data(page, "Popular")
             except Exception as e:
-                print(f"Could not click Popular tab or scrape: {e}")
+                log_error_with_context(logger, e, "Popular 탭 처리")
 
         except Exception as e:
-            print(f"An error occurred during navigation or initial setup: {e}")
+            log_error_with_context(logger, e, "페이지 네비게이션 또는 초기 설정")
         finally:
             browser.close()
 
+    # 스크래핑 결과 로깅
+    total_items = sum(len(songs) for songs in all_music_data.values())
+    duration = time.time() - start_time
+    log_scraper_end(logger, "TikTok Creative Center 스크래퍼", total_items > 0, duration, total_items)
+    
     return all_music_data
 
 if __name__ == "__main__":
     # 1. Initialize Database
-    print("Initializing database...")
+    logger.info("💾 데이터베이스 초기화 중...")
     db.create_tables()
-    print("Database ready.")
+    logger.info("✅ 데이터베이스 준비 완료.")
 
     # 2. Scrape Data
     all_music_data = scrape_tiktok_creative_center()
 
     # 3. Save Data to Database
     if not all_music_data or (not all_music_data['popular'] and not all_music_data['breakout']):
-        print("No data was scraped. Exiting.")
+        logger.error("❌ 스크래핑된 데이터가 없습니다. 종료합니다.")
     else:
-        print("\nSaving scraped data to the database...")
+        logger.info("💾 스크래핑된 데이터를 데이터베이스에 저장 중...")
+        total_saved = 0
+        
         for category, songs in all_music_data.items():
             if not songs:
-                print(f"No songs found for category: {category}")
+                logger.warning(f"⚠️ {category} 카테고리에서 곡을 찾지 못했습니다.")
                 continue
             
-            print(f"Processing {len(songs)} songs from category: {category}...")
+            logger.info(f"🎵 {category} 카테고리에서 {len(songs)}곡 처리 중...")
+            category_saved = 0
+            
             for song in songs:
                 try:
                     # Add song to 'songs' table and get its ID
@@ -207,9 +225,15 @@ if __name__ == "__main__":
                             source='tiktok',
                             category=category,
                             rank=song['rank']
-                            # metrics can be added here if available
+                            # TikTok에서는 현재 조회수 메트릭이 없음
+                            # 필요시 향후 추가 가능
                         )
+                        category_saved += 1
+                        total_saved += 1
+                        
                 except Exception as e:
-                    print(f"Error processing song '{song.get('title')}': {e}")
+                    log_error_with_context(logger, e, f"곡 처리 '{song.get('title')}'")
+            
+            log_database_operation(logger, "저장", f"{category} 트렌드", category_saved)
         
-        print("Data saving process complete.")
+        logger.info(f"✅ 데이터 저장 완료: 총 {total_saved}곡 저장됨")

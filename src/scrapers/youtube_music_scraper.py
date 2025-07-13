@@ -9,6 +9,10 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.database import database_manager as db
+from src.utils.logger_config import get_logger, log_scraper_start, log_scraper_end, log_database_operation, log_error_with_context
+
+# 로거 설정
+logger = get_logger(__name__)
 
 def parse_metric(metric_str):
     """
@@ -71,7 +75,7 @@ def scrape_category_data(page, category_name):
     """
     scraped_data = []
     
-    print(f"Scraping data from '{category_name}' category...")
+    logger.info(f"📊 '{category_name}' 카테고리 데이터 스크래핑 시작...")
 
     html_content = page.content()
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -136,7 +140,7 @@ def scrape_category_data(page, category_name):
             "youtube_id": youtube_id
         })
     
-    print(f"Finished scraping '{category_name}'. Found {len(scraped_data)} items.")
+    logger.info(f"✅ '{category_name}' 카테고리 스크래핑 완료: {len(scraped_data)}개 항목")
     return scraped_data
 
 def scrape_youtube_music_charts():
@@ -146,19 +150,22 @@ def scrape_youtube_music_charts():
         "new_releases": []
     }
     target_url = "https://charts.youtube.com/charts/TopShortsSongs/kr/daily"
+    start_time = time.time()
+    
+    log_scraper_start(logger, "YouTube Music Charts 스크래퍼", target_url)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         page = browser.new_page()
 
         try:
-            print(f"Navigating to {target_url}...")
+            logger.info(f"🌐 페이지 로딩 중: {target_url}")
             page.goto(target_url, wait_until="domcontentloaded")
             page.wait_for_timeout(5000)
 
-            print("Page loaded. Attempting to scrape data.")
+            logger.info("✅ 페이지 로딩 완료. 데이터 스크래핑 시작.")
 
-            print("Scrolling down to load all content...")
+            logger.info("📜 모든 콘텐츠 로딩을 위해 스크롤 중...")
             last_height = page.evaluate("document.body.scrollHeight")
             while True:
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -167,12 +174,12 @@ def scrape_youtube_music_charts():
                 if new_height == last_height:
                     break
                 last_height = new_height
-            print("Finished scrolling. All content should be loaded.")
+            logger.info("✅ 스크롤 완료. 모든 콘텐츠 로딩됨.")
             page.wait_for_timeout(3000)
 
             all_music_data["trending"] = scrape_category_data(page, "Most popular (Trending)")
 
-            print("Selecting 'Biggest movers'...")
+            logger.info("🔄 'Biggest movers' 선택 중...")
             dropdown_button = page.locator("ytmc-dropdown-v2#sorting-options-selector paper-button")
             dropdown_button.wait_for(state="visible", timeout=30000)
             dropdown_button.click()
@@ -186,7 +193,7 @@ def scrape_youtube_music_charts():
 
             all_music_data["top_rising"] = scrape_category_data(page, "Biggest movers (Top rising)")
 
-            print("Selecting 'Highest debut'...")
+            logger.info("🔄 'Highest debut' 선택 중...")
             dropdown_button.wait_for(state="visible", timeout=30000)
             dropdown_button.click()
             highest_debut_option = page.locator("paper-item[aria-label=\"Highest debut\"]")
@@ -198,32 +205,41 @@ def scrape_youtube_music_charts():
             all_music_data["new_releases"] = scrape_category_data(page, "Highest debut (Most popular new releases)")
 
         except Exception as e:
-            print(f"An error occurred during navigation or scraping: {e}")
+            log_error_with_context(logger, e, "네비게이션 또는 스크래핑")
         finally:
             browser.close()
+
+    # 스크래핑 결과 로깅
+    total_items = sum(len(songs) for songs in all_music_data.values())
+    duration = time.time() - start_time
+    log_scraper_end(logger, "YouTube Music Charts 스크래퍼", total_items > 0, duration, total_items)
 
     return all_music_data
 
 if __name__ == "__main__":
     # 1. Initialize Database
-    print("Initializing database...")
+    logger.info("💾 데이터베이스 초기화 중...")
     db.create_tables()
-    print("Database ready.")
+    logger.info("✅ 데이터베이스 준비 완료.")
 
     # 2. Scrape Data
     all_music_data = scrape_youtube_music_charts()
 
     # 3. Save Data to Database
     if not all_music_data or (not all_music_data['trending'] and not all_music_data['top_rising'] and not all_music_data['new_releases']):
-        print("No data was scraped. Exiting.")
+        logger.error("❌ 스크래핑된 데이터가 없습니다. 종료합니다.")
     else:
-        print("\nSaving scraped data to the database...")
+        logger.info("💾 스크래핑된 데이터를 데이터베이스에 저장 중...")
+        total_saved = 0
+        
         for category, songs in all_music_data.items():
             if not songs:
-                print(f"No songs found for category: {category}")
+                logger.warning(f"⚠️ {category} 카테고리에서 곡을 찾지 못했습니다.")
                 continue
             
-            print(f"Processing {len(songs)} songs from category: {category}...")
+            logger.info(f"🎵 {category} 카테고리에서 {len(songs)}곡 처리 중...")
+            category_saved = 0
+            
             for song in songs:
                 try:
                     # Add song to 'songs' table and get its ID
@@ -235,15 +251,24 @@ if __name__ == "__main__":
                     )
                     
                     if song_id:
+                        # Parse daily_metrics to number for efficient queries
+                        daily_view_count = db.parse_metric_value(song.get('daily_metrics'))
+                        
                         # Add trend data to 'daily_trends' table
                         db.add_trend(
                             song_id=song_id,
                             source='youtube',
                             category=category,
                             rank=song['rank'],
-                            metrics={"daily_metrics": song.get('daily_metrics')}
+                            daily_view_count=daily_view_count,
+                            metrics={"daily_metrics": song.get('daily_metrics')}  # 하위 호환성
                         )
+                        category_saved += 1
+                        total_saved += 1
+                        
                 except Exception as e:
-                    print(f"Error processing song '{song.get('title')}': {e}")
+                    log_error_with_context(logger, e, f"곡 처리 '{song.get('title')}'")
+            
+            log_database_operation(logger, "저장", f"{category} 차트", category_saved)
         
-        print("Data saving process complete.")
+        logger.info(f"✅ 데이터 저장 완료: 총 {total_saved}곡 저장됨")
