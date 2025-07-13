@@ -5,65 +5,107 @@ from bs4 import BeautifulSoup
 
 def parse_video_count(count_str):
     """
-    Parses a string like '1.4M videos' or '1,400,000 videos' into an integer.
+    Parses a string like '1.4M videos', '12만개' or '1,400,000 videos' into an integer.
     """
-    count_str = count_str.lower().replace('videos', '').strip()
+    if not count_str:
+        return 0
+        
+    count_str = count_str.lower().replace('videos', '').replace('video', '').replace('shorts', '').replace('short', '').replace('개', '').strip()
     count_str = count_str.replace(',', '')
 
-    if 'k' in count_str:
-        return int(float(count_str.replace('k', '')) * 1000)
-    elif 'm' in count_str:
-        return int(float(count_str.replace('m', '')) * 1000000)
-    else:
-        return int(count_str)
+    try:
+        # Korean number units
+        if '만' in count_str:
+            return int(float(count_str.replace('만', '')) * 10000)
+        elif '억' in count_str:
+            return int(float(count_str.replace('억', '')) * 100000000)
+        elif '천' in count_str:
+            return int(float(count_str.replace('천', '')) * 1000)
+        elif '백' in count_str:
+            return int(float(count_str.replace('백', '')) * 100)
+        elif '십' in count_str:
+            return int(float(count_str.replace('십', '')) * 10)
+        # English units
+        elif 'k' in count_str:
+            return int(float(count_str.replace('k', '')) * 1000)
+        elif 'm' in count_str:
+            return int(float(count_str.replace('m', '')) * 1000000)
+        elif 'b' in count_str:
+            return int(float(count_str.replace('b', '')) * 1000000000)
+        else:
+            return int(float(count_str))
+    except (ValueError, TypeError):
+        return 0
 
 def scrape_youtube_shorts_data(url):
     """
     Scrapes the total video count for a given YouTube Shorts URL.
+    Returns the count as integer, or 0 if no count found.
     """
+    print(f"📺 YouTube UGC 수집: {url}")
+    
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) # Set to False for visual debugging
         page = browser.new_page()
         
         try:
+            # Navigate to page
             page.goto(url, wait_until="domcontentloaded")
+            print("  ⏳ 페이지 로딩 중...")
 
-            # Wait longer for YouTube's dynamic content to load
-            page.wait_for_timeout(5000)
+            # Wait for content to load
+            page.wait_for_timeout(8000)  # 더 긴 대기 시간
             
-            # Get the page content after dynamic loading
+            # Scroll to load more content
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(3000)
+            
+            # Get page content
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
 
             # Get all text content from the page
             all_text = soup.get_text()
             
-            # Look for video count patterns in all text
+            # Debug: Print some page text to see what we're getting
+            print(f"  🔍 페이지 텍스트 샘플: {all_text[:200].strip()}...")
+            
+            # Look for video count patterns (Korean and English)
             patterns = [
-                r'(\d+[.,]?\d*[KM]?)\s*videos?',
-                r'(\d+[.,]?\d*[KM]?)\s*shorts?',
-                r'(\d+[.,]?\d*[KM]?)\s*개의?\s*동영상',
-                r'(\d+[.,]?\d*[KM]?)\s*개의?\s*쇼츠',
-                r'(\d+[.,]?\d*[KM]?)\s*short',
-                r'(\d+[.,]?\d*[KM]?)\s*video'
+                r'(\d+[.,]?\d*[만억천백십]?)\s*개',  # 12만개
+                r'(\d+[.,]?\d*[KMB]?)\s*(?:videos?|shorts?)',
+                r'(\d+[.,]?\d*[KMB]?)\s*(?:video|short)',
+                r'(\d+[.,]?\d*[만억천백십]?)\s*(?:개의?\s*)?(?:동영상|쇼츠)',
+                r'(\d+[.,]?\d*[KMB]?)\s*결과',
             ]
+            
+            found_counts = []
             
             # Search for video count patterns
             for pattern in patterns:
                 matches = re.findall(pattern, all_text, re.IGNORECASE)
                 if matches:
-                    # Return the first meaningful match
                     for match in matches:
                         try:
                             count = parse_video_count(match)
                             if count > 0:
-                                return count
-                        except:
+                                found_counts.append(count)
+                                print(f"  📊 발견된 카운트: {match} → {count:,}")
+                        except Exception as e:
+                            print(f"  ⚠️ 파싱 실패: {match} ({e})")
                             continue
             
-            return 0
+            # Return the highest count found (most likely to be the total)
+            if found_counts:
+                result = max(found_counts)
+                print(f"  ✅ 최종 결과: {result:,}개")
+                return result
+            else:
+                print(f"  ❌ 비디오 카운트를 찾을 수 없음")
+                return 0
+                
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"  💥 오류: {e}")
             return 0
         finally:
             browser.close()

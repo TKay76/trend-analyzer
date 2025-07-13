@@ -198,19 +198,19 @@ if __name__ == "__main__":
         logger.error("❌ 스크래핑된 데이터가 없습니다. 종료합니다.")
     else:
         logger.info("💾 스크래핑된 데이터를 데이터베이스에 저장 중...")
-        total_saved = 0
         
-        for category, songs in all_music_data.items():
-            if not songs:
-                logger.warning(f"⚠️ {category} 카테고리에서 곡을 찾지 못했습니다.")
-                continue
-            
-            logger.info(f"🎵 {category} 카테고리에서 {len(songs)}곡 처리 중...")
-            category_saved = 0
-            
-            for song in songs:
+        # Popular과 Breakout 데이터 분리
+        popular_songs = all_music_data.get('popular', [])
+        breakout_songs = all_music_data.get('breakout', [])
+        
+        total_saved = 0
+        trending_saved = 0
+        
+        # Popular 차트 저장 (기본, is_trending = 0)
+        if popular_songs:
+            logger.info(f"🎵 TikTok Popular 차트에서 {len(popular_songs)}곡 처리 중...")
+            for song in popular_songs:
                 try:
-                    # Add song to 'songs' table and get its ID
                     song_id = db.add_song_and_get_id(
                         title=song['title'],
                         artist=song['artist'],
@@ -219,21 +219,52 @@ if __name__ == "__main__":
                     )
                     
                     if song_id:
-                        # Add trend data to 'daily_trends' table
+                        # 트렌드 데이터 저장
                         db.add_trend(
                             song_id=song_id,
                             source='tiktok',
-                            category=category,
+                            category='popular',
                             rank=song['rank']
-                            # TikTok에서는 현재 조회수 메트릭이 없음
-                            # 필요시 향후 추가 가능
                         )
-                        category_saved += 1
                         total_saved += 1
                         
                 except Exception as e:
-                    log_error_with_context(logger, e, f"곡 처리 '{song.get('title')}'")
-            
-            log_database_operation(logger, "저장", f"{category} 트렌드", category_saved)
+                    logger.error(f"💥 Popular 곡 저장 실패 '{song.get('title')}': {e}")
         
-        logger.info(f"✅ 데이터 저장 완료: 총 {total_saved}곡 저장됨")
+        # Breakout 차트 저장 (is_trending = 1)
+        if breakout_songs:
+            logger.info(f"🔥 TikTok Breakout 차트에서 {len(breakout_songs)}곡 처리 중...")
+            for song in breakout_songs:
+                try:
+                    song_id = db.add_song_and_get_id(
+                        title=song['title'],
+                        artist=song['artist'],
+                        tiktok_id=song.get('tiktok_id'),
+                        is_approved=song.get('is_approved_for_business_use')
+                    )
+                    
+                    if song_id:
+                        # 트렌드 데이터 저장
+                        db.add_trend(
+                            song_id=song_id,
+                            source='tiktok',
+                            category='breakout',
+                            rank=song['rank']
+                        )
+                        
+                        # 인기급상승 태그 설정
+                        db.update_song_tags(
+                            title=song['title'],
+                            artist=song['artist'],
+                            is_trending=True
+                        )
+                        
+                        total_saved += 1
+                        trending_saved += 1
+                        
+                except Exception as e:
+                    logger.error(f"💥 Breakout 곡 저장 실패 '{song.get('title')}': {e}")
+        
+        logger.info(f"✅ 데이터 저장 완료:")
+        logger.info(f"  📊 전체 곡: {total_saved}개")
+        logger.info(f"  🔥 인기급상승 태그: {trending_saved}개")

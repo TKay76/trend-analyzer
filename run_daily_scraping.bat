@@ -1,4 +1,5 @@
 @echo off
+setlocal EnableDelayedExpansion
 REM =====================================================
 REM Music Trend Analyzer - Daily Scraping Batch Script
 REM 매일 자동 실행되는 음악 트렌드 데이터 수집 스크립트
@@ -22,7 +23,7 @@ if not exist "venv\Scripts\activate.bat" (
     echo ERROR: Virtual environment not found!
     echo Please run the following commands first:
     echo   python -m venv venv
-    echo   venv\Scripts\activate
+    echo   venv\Scripts\activate.bat
     echo   pip install -r requirements.txt
     echo   playwright install chromium
     echo.
@@ -78,12 +79,12 @@ if %errorlevel% equ 0 (
         echo Log files created in: %cd%\logs\
         
         REM 최신 로그 파일 찾기 및 마지막 몇 줄 표시
-        for /f %%i in ('dir logs\trend_analyzer_*.log /b /o:d 2^>nul') do set latest_log=%%i
+        for /f %%i in ('dir /b /o:d logs\trend_analyzer_*.log 2^>nul') do set latest_log=%%i
         if defined latest_log (
             echo.
             echo Latest log file: !latest_log!
             echo Last 5 lines:
-            powershell "Get-Content 'logs\!latest_log!' | Select-Object -Last 5"
+            type "logs\!latest_log!" | find /v "" | more +5
         )
     ) else (
         echo WARNING: No log files found
@@ -107,12 +108,12 @@ if %errorlevel% equ 0 (
     echo Please check the error logs in: %cd%\logs\
     
     REM 에러 로그 파일이 있다면 마지막 몇 줄 표시
-    for /f %%i in ('dir logs\errors_*.log /b /o:d 2^>nul') do set latest_error_log=%%i
+    for /f %%i in ('dir /b /o:d logs\errors_*.log 2^>nul') do set latest_error_log=%%i
     if defined latest_error_log (
         echo.
         echo Latest error log: !latest_error_log!
         echo Last 10 lines:
-        powershell "Get-Content 'logs\!latest_error_log!' | Select-Object -Last 10"
+        type "logs\!latest_error_log!" | find /v "" | more +10
     )
 )
 

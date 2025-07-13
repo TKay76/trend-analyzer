@@ -67,6 +67,8 @@ def create_tables():
             youtube_ugc_count INTEGER, -- YouTube UGC video count
             tiktok_ugc_count INTEGER, -- TikTok UGC video count
             ugc_last_updated DATETIME, -- Last time UGC counts were updated
+            is_trending INTEGER DEFAULT 0, -- 인기급상승 태그 (Biggest movers)
+            is_new_hit INTEGER DEFAULT 0, -- 가장인기 있는 신곡 태그 (Highest debut)
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(title, artist)
         )
@@ -170,6 +172,33 @@ def add_song_and_get_id(title, artist, thumbnail_url=None, youtube_id=None, tikt
         if result:
             return result['id']
         return None # 삽입 실패 또는 다른 문제
+
+def update_song_tags(title, artist, is_trending=None, is_new_hit=None):
+    """
+    곡의 태그 정보를 업데이트합니다.
+    """
+    updates = []
+    params = []
+    
+    if is_trending is not None:
+        updates.append("is_trending = ?")
+        params.append(1 if is_trending else 0)
+    
+    if is_new_hit is not None:
+        updates.append("is_new_hit = ?")
+        params.append(1 if is_new_hit else 0)
+    
+    if not updates:
+        return False
+    
+    sql = f"UPDATE songs SET {', '.join(updates)} WHERE title = ? AND artist = ?"
+    params.extend([title, artist])
+    
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        conn.commit()
+        return cur.rowcount > 0
 
 def add_trend(song_id, source, category, rank, metrics=None, daily_view_count=None, weekly_view_count=None, engagement_rate=None):
     """
