@@ -96,6 +96,7 @@ python src/scrapers/ugc_data_updater.py
 # 특정 플랫폼 UGC만 업데이트
 python src/scrapers/ugc_data_updater.py youtube
 python src/scrapers/ugc_data_updater.py tiktok
+
 ```
 
 ### 데이터 확인
@@ -113,6 +114,7 @@ python src/database/view_database.py
 ### UGC 데이터
 - **YouTube Shorts**: 해당 음원을 사용한 쇼츠 동영상 개수
 - **TikTok Videos**: 해당 음원을 사용한 동영상 개수
+
 
 ### 데이터베이스 스키마 (최적화됨)
 - **songs**: 곡 정보 (제목, 아티스트, 플랫폼 ID, UGC 카운트, 비즈니스 승인 여부)
@@ -208,6 +210,45 @@ crontab -e
 - [TikTok Creative Center](https://ads.tiktok.com/business/creativecenter/inspiration/popular/music/pc/en)
 - [YouTube Music Charts](https://charts.youtube.com/charts/TopShortsSongs/kr/daily)
 - [Playwright Documentation](https://playwright.dev/python/)
+
+---
+
+## 📝 업데이트 히스토리
+
+### 🆕 v3.0 - 해시태그 트렌드 분석 (2025-01-13)
+#### 🏷️ 주요 기능 추가
+- **TikTok 해시태그 수집**: 각 음원별 상위 10개 해시태그와 빈도수 수집
+- **양방향 검색 시스템**: 해시태그로 음원 찾기, 음원으로 해시태그 찾기
+- **해시태그 트렌드 분석**: 음원별 해시태그 패턴 및 장르별 특성 분석
+
+#### 🔧 기술적 개선
+- `tiktok_ugc_counter.py` 확장: 비디오 개수 + 해시태그 동시 수집
+- `song_hashtags` 테이블 추가: 해시태그 빈도수 및 순위 저장
+- `collect_song_hashtags.py` 스크립트: 배치 해시태그 수집 도구
+- 해시태그 관련 데이터베이스 인덱스 최적화
+
+#### 📊 분석 가능 데이터
+- 음원별 주요 해시태그 Top 10 (빈도수 포함)
+- 해시태그별 인기 음원 랭킹
+- 장르별 해시태그 패턴 (예: K-pop → #kpop, #dance)
+- 바이럴 해시태그 트렌드 (#fyp, #viral 등)
+
+#### 🎯 활용 사례
+- **음악 마케팅**: 해시태그 기반 콘텐츠 전략 수립
+- **트렌드 예측**: 해시태그 패턴을 통한 바이럴 가능성 분석  
+- **장르 분석**: 음악 스타일별 해시태그 선호도 파악
+- **콘텐츠 기획**: 인기 해시태그 조합 발굴
+
+### v2.0 - 성능 최적화 및 프로덕션 준비 (2024년)
+- 데이터베이스 스키마 개선 (JSON → 구조화된 컬럼)
+- 포괄적인 로깅 시스템 구축 (272개 print문 → 구조화된 로그)
+- Windows 자동화 설정 및 배치 스크립트
+- 데이터베이스 인덱스 최적화 (100-1000배 성능 향상)
+
+### v1.0 - 초기 릴리즈
+- TikTok, YouTube 음악 트렌드 수집
+- UGC 동영상 개수 추적
+- 기본 데이터베이스 스키마
 
 ---
 

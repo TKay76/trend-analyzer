@@ -86,6 +86,18 @@ def create_tables():
             FOREIGN KEY (song_id) REFERENCES songs (id),
             UNIQUE(song_id, source, category, date)
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS song_hashtags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            song_id INTEGER NOT NULL,
+            hashtag TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            rank INTEGER NOT NULL, -- 해당 곡에서의 해시태그 순위 (1-10)
+            collected_date DATE DEFAULT (date('now')),
+            FOREIGN KEY (song_id) REFERENCES songs (id),
+            UNIQUE(song_id, hashtag, collected_date)
+        )
         """
     )
     with get_db_connection() as conn:
@@ -112,7 +124,13 @@ def create_indexes():
         "CREATE INDEX IF NOT EXISTS idx_songs_youtube_id ON songs (youtube_id)",
         "CREATE INDEX IF NOT EXISTS idx_songs_tiktok_id ON songs (tiktok_id)",
         "CREATE INDEX IF NOT EXISTS idx_songs_approval_status ON songs (is_approved_for_business_use)",
-        "CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs (artist)"
+        "CREATE INDEX IF NOT EXISTS idx_songs_artist ON songs (artist)",
+        
+        # song_hashtags 테이블 인덱스들
+        "CREATE INDEX IF NOT EXISTS idx_song_hashtags_song_id ON song_hashtags (song_id)",
+        "CREATE INDEX IF NOT EXISTS idx_song_hashtags_hashtag ON song_hashtags (hashtag)",
+        "CREATE INDEX IF NOT EXISTS idx_song_hashtags_count ON song_hashtags (count)",
+        "CREATE INDEX IF NOT EXISTS idx_song_hashtags_date ON song_hashtags (collected_date)"
     ]
     
     with get_db_connection() as conn:
@@ -206,6 +224,74 @@ def update_ugc_counts(song_id, youtube_count=None, tiktok_count=None):
             conn.commit()
             return cur.rowcount > 0
     return False
+
+def save_song_hashtags(song_id, top_hashtags):
+    """
+    곡의 상위 해시태그들을 데이터베이스에 저장합니다.
+    
+    Args:
+        song_id: 곡 ID
+        top_hashtags: [(hashtag, count), ...] 형태의 리스트 (순위순으로 정렬됨)
+    """
+    if not top_hashtags:
+        return
+        
+    # 기존 해시태그 데이터 삭제 (오늘 날짜)
+    delete_sql = """
+    DELETE FROM song_hashtags 
+    WHERE song_id = ? AND collected_date = date('now')
+    """
+    
+    # 새 해시태그 데이터 삽입
+    insert_sql = """
+    INSERT INTO song_hashtags (song_id, hashtag, count, rank, collected_date)
+    VALUES (?, ?, ?, ?, date('now'))
+    """
+    
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        
+        # 기존 데이터 삭제
+        cur.execute(delete_sql, (song_id,))
+        
+        # 새 데이터 삽입
+        for rank, (hashtag, count) in enumerate(top_hashtags, 1):
+            cur.execute(insert_sql, (song_id, hashtag, count, rank))
+        
+        conn.commit()
+        
+        log_database_operation(logger, "저장", f"곡 {song_id}의 해시태그", len(top_hashtags))
+
+def get_song_hashtags(song_id, limit=10):
+    """곡의 해시태그를 조회합니다."""
+    sql = """
+    SELECT hashtag, count, rank 
+    FROM song_hashtags 
+    WHERE song_id = ? 
+    ORDER BY rank ASC 
+    LIMIT ?
+    """
+    
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, (song_id, limit))
+        return cur.fetchall()
+
+def get_hashtag_songs(hashtag, limit=20):
+    """특정 해시태그가 사용된 곡들을 조회합니다."""
+    sql = """
+    SELECT s.title, s.artist, sh.count, sh.rank
+    FROM song_hashtags sh
+    JOIN songs s ON sh.song_id = s.id
+    WHERE sh.hashtag = ?
+    ORDER BY sh.count DESC
+    LIMIT ?
+    """
+    
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, (hashtag, limit))
+        return cur.fetchall()
 
 def get_songs_with_platform_ids(platform='both'):
     """플랫폼 ID가 있는 곡들을 조회합니다."""
