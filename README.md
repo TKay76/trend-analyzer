@@ -36,8 +36,8 @@ TikTok과 YouTube의 인기 음악 트렌드를 자동으로 수집하고, UGC(U
 │   ├── improve_database_schema.py     # 스키마 마이그레이션
 │   ├── fix_business_approval_column.py # NULL 값 수정
 │   └── optimize_database_indexes.py   # 인덱스 최적화
-├── run_trend_analysis.py              # 메인 실행 파일
-├── run_daily_scraping.bat             # Windows 자동화 배치 파일
+├── run_complete_collection.bat        # Windows 메인 실행 파일
+├── setup_environment.bat              # Windows 환경 설정 파일
 └── requirements.txt                   # 의존성 패키지 (버전 고정)
 ```
 
@@ -88,14 +88,14 @@ python run_trend_analysis.py
 python src/scrapers/tiktok_music_scraper.py
 
 # YouTube 트렌드만 수집
-python src/scrapers/youtube_music_scraper.py
+python src/scrapers/youtube_csv_scraper.py
 
-# UGC 데이터만 업데이트
-python src/scrapers/ugc_data_updater.py
+# 안전한 배치 수집 (권장)
+python scripts/collect_tiktok_batch_safe.py
+python scripts/collect_youtube_batch_safe.py
 
-# 특정 플랫폼 UGC만 업데이트
-python src/scrapers/ugc_data_updater.py youtube
-python src/scrapers/ugc_data_updater.py tiktok
+# 수집 상태 확인
+python scripts/check_collection_status.py
 
 ```
 
@@ -103,6 +103,9 @@ python src/scrapers/ugc_data_updater.py tiktok
 ```bash
 # 대화형 데이터베이스 뷰어 실행
 python src/database/view_database.py
+
+# Windows에서 가상환경 사용 시
+venv\Scripts\python.exe src/database/view_database.py
 ```
 
 ## 📊 수집되는 데이터
@@ -137,8 +140,8 @@ python src/database/view_database.py
 📖 **[Windows 자동화 설정 가이드](docs/Windows_Scheduler_Setup.md)** - 매일 새벽 2시 자동 실행
 
 ```bash
-# 제공된 배치 파일 사용
-run_daily_scraping.bat
+# 제공된 배치 파일 사용 (Windows)
+run_complete_collection.bat
 ```
 
 #### 주요 기능:
@@ -218,6 +221,51 @@ crontab -e
 ---
 
 ## 📝 업데이트 히스토리
+
+### 🆕 v0.5 - 폴더 구조 개선 및 인코딩 안정화 (2025-07-14)
+#### 🗂️ 주요 개선사항
+- **📁 폴더 구조 정리**: 모든 실행 스크립트를 `scripts/` 폴더로 통합 정리
+- **🔧 인코딩 문제 해결**: Windows 환경에서 UTF-8 인코딩 완전 지원
+- **📊 진행상황 관리**: `progress_*.json` 파일을 `logs/` 폴더로 이동
+- **🧹 불필요 파일 정리**: 임시 파일 및 중복 데이터베이스 파일 제거
+
+#### 🛠️ 기술적 개선
+- **UTF-8 환경변수**: `PYTHONIOENCODING=utf-8`, `PYTHONUTF8=1` 설정으로 한글/이모지 출력 안정화
+- **에러 출력 숨김**: `2>nul` 옵션으로 인코딩 에러 메시지 차단
+- **경로 업데이트**: 배치 파일에서 `scripts\` 경로 자동 인식
+- **데이터베이스 통합**: 중복된 DB 파일 제거로 단일 데이터 소스 유지
+
+#### 📋 새로운 폴더 구조
+```
+trend-analyzer/
+├── scripts/           # 모든 실행 스크립트 통합
+│   ├── collect_tiktok_batch_safe.py
+│   ├── collect_youtube_batch_safe.py
+│   ├── daily_complete_collection.py
+│   ├── check_collection_status.py
+│   └── [기타 스크립트들]
+├── logs/              # 로그 및 진행상황 파일
+│   ├── progress_tiktok.json
+│   ├── progress_youtube.json
+│   └── [로그 파일들]
+└── [기타 폴더들]
+```
+
+#### 🔄 사용법 개선
+```bash
+# 인코딩 문제 없이 안정적인 실행
+run_complete_collection.bat
+
+# 개별 스크립트 실행 (새로운 경로)
+python scripts/collect_tiktok_batch_safe.py
+python scripts/check_collection_status.py
+```
+
+#### 🎯 비즈니스 가치
+- **운영 안정성**: 인코딩 오류로 인한 중단 없이 안정적인 데이터 수집
+- **유지보수성**: 정리된 폴더 구조로 스크립트 관리 용이
+- **사용자 경험**: 에러 메시지 정리로 깔끔한 실행 결과
+- **자동화 신뢰성**: Windows 환경에서 24/7 무인 운영 가능
 
 ### 🆕 v0.4 - 고급 UGC 분석 및 리포트 시스템 (2025-01-14)
 #### 🚀 주요 신기능
