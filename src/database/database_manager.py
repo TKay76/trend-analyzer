@@ -12,7 +12,7 @@ from src.utils.logger_config import get_logger, log_database_operation, log_erro
 logger = get_logger(__name__)
 
 # 프로젝트 루트에서 data 폴더 내의 데이터베이스 파일 경로
-DB_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'trend_analysis.db')
+DB_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'music_trends.db')
 
 def parse_metric_value(metric_str):
     """

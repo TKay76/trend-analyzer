@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.utils.logger_config import get_logger, log_error_with_context
+from src.database import database_manager as db
 
 logger = get_logger(__name__)
 
@@ -205,15 +206,67 @@ def extract_video_count_from_soup(soup):
         logger.warning("⚠️ 비디오 카운트 요소를 찾을 수 없음")
         return 0
 
+def save_to_database(tiktok_url, result_data):
+    """수집된 데이터를 데이터베이스에 저장"""
+    if not result_data['success']:
+        return False
+    
+    # TikTok URL에서 TikTok ID 추출
+    if '/music/x-' in tiktok_url:
+        tiktok_id = tiktok_url.split('/music/x-')[1].split('?')[0]
+    else:
+        logger.warning("❌ TikTok ID를 추출할 수 없습니다")
+        return False
+    
+    try:
+        # 해당 TikTok ID를 가진 곡 찾기
+        songs = db.get_songs_with_platform_ids('tiktok')
+        target_song = None
+        
+        for song in songs:
+            if len(song) >= 4 and song[3] == tiktok_id:  # tiktok_id 컬럼
+                target_song = song
+                break
+        
+        if not target_song:
+            logger.warning(f"❌ TikTok ID {tiktok_id}에 해당하는 곡을 찾을 수 없습니다")
+            return False
+        
+        song_id = target_song[0]
+        title = target_song[1]
+        artist = target_song[2]
+        
+        # UGC 카운트 저장
+        ugc_count = result_data['video_count']
+        if ugc_count > 0:
+            db.update_ugc_counts(song_id, tiktok_count=ugc_count)
+            logger.info(f"✅ UGC 카운트 저장: {title} - {artist} → {ugc_count:,}개")
+        
+        # 해시태그 저장
+        hashtags = result_data['top_hashtags']
+        if hashtags:
+            db.save_song_hashtags(song_id, hashtags)
+            logger.info(f"✅ 해시태그 저장: {title} - {artist} → {len(hashtags)}개")
+        
+        return True
+        
+    except Exception as e:
+        log_error_with_context(logger, e, "데이터베이스 저장")
+        return False
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("사용법:")
-        print("  python tiktok_ugc_counter.py <TikTok_Sound_URL>")
+        print("  python tiktok_ugc_counter.py <TikTok_Sound_URL> [--save-db]")
         print("\n💡 TikTok 사운드 URL 예시:")
         print("  https://www.tiktok.com/music/x-7373776748699421486")
+        print("\n💾 데이터베이스 저장:")
+        print("  python tiktok_ugc_counter.py <URL> --save-db")
         sys.exit(1)
 
     tiktok_url = sys.argv[1]
+    save_to_db = '--save-db' in sys.argv
+    
     result = scrape_tiktok_sound_data(tiktok_url)
     
     if result['success']:
@@ -221,5 +274,12 @@ if __name__ == "__main__":
         print(f"상위 해시태그:")
         for i, (hashtag, count) in enumerate(result['top_hashtags'], 1):
             print(f"  {i:2d}. #{hashtag}: {count:,}회")
+        
+        # 데이터베이스 저장
+        if save_to_db:
+            if save_to_database(tiktok_url, result):
+                print("\n💾 데이터베이스 저장 완료!")
+            else:
+                print("\n❌ 데이터베이스 저장 실패!")
     else:
         print(f"오류: {result['error_message']}")

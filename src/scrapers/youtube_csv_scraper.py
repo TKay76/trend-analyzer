@@ -33,6 +33,15 @@ def extract_youtube_id_from_url(youtube_url):
         return youtube_url.split('watch?v=')[1].split('&')[0]
     return None
 
+def generate_shorts_url(youtube_id):
+    """
+    YouTube ID로부터 Shorts 검색 URL을 생성합니다.
+    예: 983bBbJx0Mk -> https://www.youtube.com/source/983bBbJx0Mk/shorts
+    """
+    if not youtube_id:
+        return None
+    return f"https://www.youtube.com/source/{youtube_id}/shorts"
+
 def analyze_chart_position(current_rank, previous_rank, periods_on_chart):
     """
     차트 순위 변화를 분석하여 태그를 생성합니다.
@@ -67,7 +76,10 @@ def download_youtube_csv():
         str: 다운로드된 CSV 파일 경로, 실패시 None
     """
     target_url = "https://charts.youtube.com/charts/TopShortsSongs/kr/daily"
-    download_dir = tempfile.mkdtemp()
+    
+    # CSV 저장 폴더 설정
+    csv_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'csv_downloads')
+    os.makedirs(csv_dir, exist_ok=True)
     
     logger.info(f"📊 YouTube Charts CSV 다운로드 시작: {target_url}")
     
@@ -92,37 +104,47 @@ def download_youtube_csv():
             all_buttons = page.locator("button, a, .button, [role='button']").all()
             logger.info(f"총 {len(all_buttons)}개의 클릭 가능한 요소 발견")
             
-            # 다운로드 버튼 선택자들 (여러 가능성 시도)
+            # 실제 발견된 다운로드 버튼 선택자들
             download_selectors = [
+                "#download-button",  # 실제 발견된 ID
+                "paper-icon-button#download-button",  # 정확한 태그와 ID
+                "paper-icon-button[title='download']",  # title 속성으로 찾기
+                "paper-icon-button[icon='ytmc-icons-ext:download-white-fill']",  # 아이콘으로 찾기
+                ".ytmc-top-banner paper-icon-button",  # 클래스 컨테이너 내에서 찾기
+                "paper-icon-button[role='button'][title='download']",  # 복합 속성
+                "[title='download']",  # title만으로
+                "button[title='download']",  # 일반 버튼 형태
+                "#download",  # 혹시 모를 다른 ID
                 "button[aria-label*='Download']",
-                "button[aria-label*='다운로드']",
-                ".download-button",
-                "button:has-text('Download')",
-                "button:has-text('다운로드')",
-                "[data-testid='download-button']",
-                ".ytmc-download-button",
-                "svg[aria-label*='download'], svg[aria-label*='Download']",
-                "[title*='Download'], [title*='다운로드']"
+                "button[aria-label*='다운로드']"
             ]
             
             download_clicked = False
+            
+            # 다운로드 버튼 직접 클릭 시도 (상단 메뉴에 위치)
             for selector in download_selectors:
                 try:
                     if page.locator(selector).count() > 0:
-                        # 다운로드 시작 대기
-                        with page.expect_download() as download_info:
-                            page.locator(selector).click(timeout=10000)
+                        logger.info(f"🔽 다운로드 버튼 시도: {selector}")
                         
-                        download = download_info.value
-                        
-                        # 파일 저장
-                        csv_filename = f"youtube_charts_{datetime.now().strftime('%Y%m%d')}.csv"
-                        csv_path = os.path.join(download_dir, csv_filename)
-                        download.save_as(csv_path)
-                        
-                        logger.info(f"✅ CSV 다운로드 완료: {csv_path}")
-                        download_clicked = True
-                        break
+                        # 버튼이 보이는지 확인
+                        if page.locator(selector).is_visible():
+                            # 다운로드 시작 대기
+                            with page.expect_download() as download_info:
+                                page.locator(selector).click(timeout=10000)
+                            
+                            download = download_info.value
+                            
+                            # 파일 저장
+                            csv_filename = f"youtube_charts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                            csv_path = os.path.join(csv_dir, csv_filename)
+                            download.save_as(csv_path)
+                            
+                            logger.info(f"✅ CSV 다운로드 완료: {csv_path}")
+                            download_clicked = True
+                            break
+                        else:
+                            logger.debug(f"선택자 {selector}는 존재하지만 보이지 않음")
                         
                 except Exception as e:
                     logger.debug(f"선택자 {selector} 시도 실패: {e}")
@@ -170,6 +192,9 @@ def parse_csv_data(csv_path):
                     # YouTube ID 추출 (없어도 저장함)
                     youtube_id = extract_youtube_id_from_url(youtube_url)
                     
+                    # Shorts URL 생성
+                    shorts_url = generate_shorts_url(youtube_id)
+                    
                     # 태그 분석
                     is_trending, is_new_hit = analyze_chart_position(
                         rank, previous_rank, periods_on_chart
@@ -183,6 +208,7 @@ def parse_csv_data(csv_path):
                         'periods_on_chart': periods_on_chart,
                         'youtube_url': youtube_url,
                         'youtube_id': youtube_id,  # None일 수 있음
+                        'shorts_url': shorts_url,  # UGC 카운터용 URL
                         'is_trending': is_trending,
                         'is_new_hit': is_new_hit
                     }
@@ -235,7 +261,8 @@ def save_to_database(songs_data):
                     metrics={
                         'previous_rank': song['previous_rank'],
                         'periods_on_chart': song['periods_on_chart'],
-                        'youtube_url': song['youtube_url']
+                        'youtube_url': song['youtube_url'],
+                        'shorts_url': song['shorts_url']
                     }
                 )
                 
@@ -291,12 +318,8 @@ def scrape_youtube_charts_csv():
         # 3. 데이터베이스 저장
         saved_count = save_to_database(songs_data)
         
-        # 4. 임시 파일 정리
-        try:
-            os.remove(csv_path)
-            os.rmdir(os.path.dirname(csv_path))
-        except:
-            pass
+        # 4. CSV 파일 보존 (임시 파일이 아니므로 삭제하지 않음)
+        logger.info(f"📁 CSV 파일 저장 위치: {csv_path}")
         
         # 결과 로깅
         duration = time.time() - start_time

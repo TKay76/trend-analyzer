@@ -1,0 +1,27 @@
+# Git 라인 엔딩 설정
+# 텍스트 파일은 저장소에서 LF, 체크아웃 시 자동 변환
+* text=auto
+
+# Python 파일들은 항상 LF 사용
+*.py text eol=lf
+*.pyx text eol=lf
+*.pyi text eol=lf
+
+# 설정 파일들
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Shell 스크립트 (Linux/Mac용)
+*.sh text eol=lf
+
+# 배치 파일 (Windows용)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 가상환경 파일들은 바이너리로 처리 (커밋하지 않음)
+test_env/** binary
+venv/** binary
+env/** binary

@@ -4,7 +4,7 @@ import os
 
 def view_database():
     """데이터베이스 내용을 보기 좋게 출력"""
-    db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'trend_analysis.db')
+    db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'music_trends.db')
     conn = sqlite3.connect(db_path)
     
     print("=== 데이터베이스 개요 ===")
