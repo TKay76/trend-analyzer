@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Videos 탭의 직접 URL 찾기
+음악 스크래퍼처럼 비디오 전용 URL이 있을 것
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def find_videos_direct_url():
+    """
+    음악처럼 비디오도 직접 URL이 있는지 확인
+    음악: /inspiration/popular/music/pc/en
+    비디오: /inspiration/popular/video/pc/en 일 가능성
+    """
+    
+    # 가능한 URL 패턴들
+    possible_urls = [
+        "https://ads.tiktok.com/business/creativecenter/inspiration/popular/video/pc/en",
+        "https://ads.tiktok.com/business/creativecenter/inspiration/popular/videos/pc/en", 
+        "https://ads.tiktok.com/business/creativecenter/inspiration/popular/tiktok/pc/en",
+        "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",  # 기본 URL로 비디오 탭 찾기
+    ]
+    
+    print("TikTok Videos 직접 URL 탐색...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        results = []
+        
+        try:
+            for i, url in enumerate(possible_urls):
+                print(f"\n=== URL {i+1} 테스트 ===")
+                print(f"URL: {url}")
+                
+                try:
+                    page.goto(url, timeout=30000)
+                    page.wait_for_timeout(3000)
+                    
+                    # 페이지 제목과 URL 확인
+                    title = page.title()
+                    current_url = page.url
+                    print(f"페이지 제목: {title}")
+                    print(f"실제 URL: {current_url}")
+                    
+                    # 페이지 내용 분석
+                    html_content = page.content()
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # 음악 스크래퍼와 같은 패턴으로 아이템 찾기
+                    music_items = soup.select("div.ItemCard_soundItemContainer__GUmFb")
+                    video_items = soup.select("div[class*='ItemCard'][class*='videoItemContainer']")
+                    video_items2 = soup.select("div[class*='ItemCard'][class*='Video']")
+                    general_items = soup.select("div[class*='ItemCard']")
+                    
+                    print(f"음악 아이템 패턴: {len(music_items)}개")
+                    print(f"비디오 아이템 패턴1: {len(video_items)}개")
+                    print(f"비디오 아이템 패턴2: {len(video_items2)}개")
+                    print(f"일반 ItemCard: {len(general_items)}개")
+                    
+                    # 비디오 관련 키워드 확인
+                    page_text = soup.get_text().lower()
+                    has_video_content = 'video' in page_text and 'trending' in page_text
+                    has_view_more = 'view more' in page_text
+                    
+                    print(f"비디오 콘텐츠 키워드: {has_video_content}")
+                    print(f"View More 버튼: {has_view_more}")
+                    
+                    # 탭 버튼들 확인
+                    tabs = soup.select("button[class*='Tab'], a[class*='Tab'], div[class*='Tab']")
+                    tab_texts = [tab.get_text().strip() for tab in tabs if tab.get_text().strip()]
+                    print(f"탭들: {tab_texts[:5]}")
+                    
+                    # 실제 비디오 아이템이 있는지 확인
+                    items_with_thumbnails = soup.select("div[class*='ItemCard'] img")
+                    tiktok_thumbnails = [img for img in items_with_thumbnails 
+                                       if img.get('src', '') and 'tiktokcdn.com' in img.get('src', '')]
+                    
+                    print(f"TikTok 썸네일: {len(tiktok_thumbnails)}개")
+                    
+                    # 첫 번째 일반 ItemCard 분석
+                    if general_items:
+                        first_item = general_items[0]
+                        item_text = first_item.get_text().strip()
+                        item_images = first_item.select("img")
+                        item_links = first_item.select("a")
+                        
+                        print(f"첫 번째 아이템 텍스트: {item_text[:50]}...")
+                        print(f"첫 번째 아이템 이미지: {len(item_images)}개")
+                        print(f"첫 번째 아이템 링크: {len(item_links)}개")
+                        
+                        if item_images:
+                            img_src = item_images[0].get('src', '')
+                            print(f"첫 번째 이미지 URL: {img_src[:60]}...")
+                    
+                    result = {
+                        "url": url,
+                        "title": title,
+                        "current_url": current_url,
+                        "music_items": len(music_items),
+                        "video_items": len(video_items),
+                        "general_items": len(general_items),
+                        "has_video_content": has_video_content,
+                        "has_view_more": has_view_more,
+                        "tabs": tab_texts[:5],
+                        "tiktok_thumbnails": len(tiktok_thumbnails)
+                    }
+                    
+                    results.append(result)
+                    
+                    # 이 URL이 비디오 콘텐츠를 가지고 있다면 더 자세히 분석
+                    if general_items and len(general_items) > 10:
+                        print(">>> 이 URL에 충분한 아이템이 있음! <<<")
+                        break
+                        
+                except Exception as e:
+                    print(f"URL 테스트 실패: {e}")
+                    results.append({
+                        "url": url,
+                        "error": str(e)
+                    })
+            
+            # 결과 저장
+            final_result = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "url_tests": results
+            }
+            
+            with open("videos_url_exploration.json", 'w', encoding='utf-8') as f:
+                json.dump(final_result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n결과 저장: videos_url_exploration.json")
+            print("\n15초 후 브라우저 종료...")
+            page.wait_for_timeout(15000)
+            
+        except Exception as e:
+            print(f"전체 오류: {e}")
+        
+        finally:
+            browser.close()
+    
+    print("URL 탐색 완료!")
+
+if __name__ == "__main__":
+    find_videos_direct_url()

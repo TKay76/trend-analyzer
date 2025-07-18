@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""
+Crawl4AI를 사용한 TikTok Creative Center 스크래핑 테스트
+"""
+
+import asyncio
+import json
+import re
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+
+async def extract_hashtags_from_text(text):
+    """텍스트에서 해시태그 추출"""
+    if not text:
+        return []
+    return re.findall(r'#\w+', text)
+
+async def test_crawl4ai_basic():
+    """Crawl4AI 기본 테스트"""
+    print("Crawl4AI 기본 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        # Creative Center 페이지 크롤링
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            config=CrawlerRunConfig(
+                word_count_threshold=10,
+                css_selector=".CommonGridLayoutDataList_cardWrapper__jkA9g",
+                wait_for="networkidle",
+                page_timeout=30000,
+                magic=True,  # 스마트 추출 활성화
+                only_text=True  # 텍스트만 추출
+            )
+        )
+        
+        if result.success:
+            print(f"크롤링 성공!")
+            print(f"URL: {result.url}")
+            print(f"추출된 텍스트 길이: {len(result.extracted_content)}")
+            
+            # 해시태그 찾기
+            hashtags = await extract_hashtags_from_text(result.extracted_content)
+            print(f"발견된 해시태그 ({len(hashtags)}개): {hashtags[:10]}")
+            
+            # 결과 저장
+            with open('crawl4ai_basic_result.json', 'w', encoding='utf-8') as f:
+                json.dump({
+                    'success': True,
+                    'url': result.url,
+                    'content_length': len(result.extracted_content),
+                    'hashtags': hashtags,
+                    'content_preview': result.extracted_content[:500]
+                }, f, ensure_ascii=False, indent=2)
+                
+            return True
+        else:
+            print(f"크롤링 실패: {result.error_message}")
+            return False
+
+async def test_crawl4ai_with_js():
+    """JavaScript 실행을 포함한 고급 테스트"""
+    print("Crawl4AI JavaScript 실행 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        # JavaScript로 페이지 상호작용
+        js_code = """
+        // 페이지가 로드될 때까지 대기
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // View More 버튼 찾기
+        const viewMoreButtons = document.querySelectorAll('button, [role="button"]');
+        let clicked = 0;
+        
+        for (let button of viewMoreButtons) {
+            const text = button.textContent?.toLowerCase() || '';
+            if (text.includes('view more') || text.includes('더보기') || text.includes('load more')) {
+                try {
+                    button.click();
+                    clicked++;
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    if (clicked >= 2) break; // 최대 2번만 클릭
+                } catch (e) {
+                    console.log('Click failed:', e);
+                }
+            }
+        }
+        
+        // 결과 반환
+        return {
+            clicked_buttons: clicked,
+            video_cards: document.querySelectorAll('.CommonGridLayoutDataList_cardWrapper__jkA9g').length,
+            page_text: document.body.innerText.substring(0, 1000)
+        };
+        """
+        
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            config=CrawlerRunConfig(
+                js_code=js_code,
+                wait_for="networkidle",
+                page_timeout=60000,
+                css_selector=".CommonGridLayoutDataList_cardWrapper__jkA9g",
+                magic=True
+            )
+        )
+        
+        if result.success:
+            print(f"JavaScript 실행 성공!")
+            
+            # JavaScript 결과 확인
+            if hasattr(result, 'js_execution_result'):
+                js_result = result.js_execution_result
+                print(f"클릭한 버튼: {js_result.get('clicked_buttons', 0)}개")
+                print(f"비디오 카드: {js_result.get('video_cards', 0)}개")
+            
+            # 해시태그 추출
+            hashtags = await extract_hashtags_from_text(result.extracted_content)
+            print(f"발견된 해시태그: {len(hashtags)}개")
+            
+            # 결과 저장
+            with open('crawl4ai_js_result.json', 'w', encoding='utf-8') as f:
+                json.dump({
+                    'success': True,
+                    'url': result.url,
+                    'js_result': getattr(result, 'js_execution_result', None),
+                    'hashtags': hashtags,
+                    'content_preview': result.extracted_content[:500]
+                }, f, ensure_ascii=False, indent=2)
+                
+            return True
+        else:
+            print(f"JavaScript 실행 실패: {result.error_message}")
+            return False
+
+async def test_crawl4ai_structured():
+    """구조화된 데이터 추출 테스트"""
+    print("Crawl4AI 구조화된 데이터 추출 테스트...")
+    
+    # 비디오 데이터 추출을 위한 스키마 정의
+    schema = {
+        "name": "tiktok_videos",
+        "baseSelector": ".CommonGridLayoutDataList_cardWrapper__jkA9g",
+        "fields": [
+            {
+                "name": "video_id",
+                "selector": "iframe",
+                "attribute": "src",
+                "transform": "js:value.split('/video/')[1]?.split('?')[0]"
+            },
+            {
+                "name": "thumbnail",
+                "selector": "img",
+                "attribute": "src"
+            },
+            {
+                "name": "description", 
+                "selector": "*",
+                "type": "text"
+            }
+        ]
+    }
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            config=CrawlerRunConfig(
+                extraction_strategy="json_css",
+                schema=schema,
+                wait_for="networkidle",
+                page_timeout=30000
+            )
+        )
+        
+        if result.success:
+            print(f"구조화된 추출 성공!")
+            
+            # 추출된 데이터 분석
+            try:
+                extracted_data = json.loads(result.extracted_content)
+                videos = extracted_data.get('tiktok_videos', [])
+                print(f"추출된 비디오: {len(videos)}개")
+                
+                # 각 비디오에서 해시태그 찾기
+                all_hashtags = []
+                for video in videos:
+                    desc = video.get('description', '')
+                    hashtags = await extract_hashtags_from_text(desc)
+                    all_hashtags.extend(hashtags)
+                    if hashtags:
+                        print(f"비디오 {video.get('video_id', 'N/A')}: {hashtags}")
+                
+                print(f"총 해시태그: {len(set(all_hashtags))}개")
+                
+                # 결과 저장
+                with open('crawl4ai_structured_result.json', 'w', encoding='utf-8') as f:
+                    json.dump({
+                        'success': True,
+                        'videos': videos,
+                        'total_hashtags': list(set(all_hashtags)),
+                        'hashtag_count': len(set(all_hashtags))
+                    }, f, ensure_ascii=False, indent=2)
+                    
+                return True
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON 파싱 실패: {e}")
+                print(f"원본 내용: {result.extracted_content[:200]}")
+                return False
+        else:
+            print(f"구조화된 추출 실패: {result.error_message}")
+            return False
+
+async def main():
+    """메인 테스트 함수"""
+    print("Crawl4AI TikTok 테스트 시작...")
+    print("="*60)
+    
+    # 순차적으로 테스트 실행
+    tests = [
+        ("기본 테스트", test_crawl4ai_basic),
+        ("JavaScript 테스트", test_crawl4ai_with_js), 
+        ("구조화된 추출 테스트", test_crawl4ai_structured)
+    ]
+    
+    results = {}
+    
+    for test_name, test_func in tests:
+        print(f"\n[{test_name}] 실행 중...")
+        try:
+            success = await test_func()
+            results[test_name] = "성공" if success else "실패"
+            print(f"[{test_name}] 완료: {'성공' if success else '실패'}")
+        except Exception as e:
+            results[test_name] = f"오류: {str(e)}"
+            print(f"[ERROR] {test_name} 오류: {e}")
+        
+        print("-" * 40)
+    
+    # 최종 결과 리포트
+    print(f"\n{'='*60}")
+    print("Crawl4AI 테스트 결과 요약")
+    print(f"{'='*60}")
+    
+    for test_name, result in results.items():
+        print(f"{test_name}: {result}")
+    
+    print(f"\n생성된 파일들:")
+    print("- crawl4ai_basic_result.json")
+    print("- crawl4ai_js_result.json") 
+    print("- crawl4ai_structured_result.json")
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""
+최신 업데이트 시간 확인 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+from datetime import datetime
+
+def check_latest_updates():
+    """최신 업데이트 시간 확인"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 70)
+        print("🕐 최신 업데이트 시간 확인")
+        print("=" * 70)
+        
+        # 가장 최근 업데이트 시간
+        cursor.execute("""
+            SELECT MAX(ugc_last_updated) as latest_update
+            FROM songs 
+            WHERE ugc_last_updated IS NOT NULL
+        """)
+        latest_update = cursor.fetchone()[0]
+        
+        if latest_update:
+            print(f"📅 가장 최근 업데이트: {latest_update}")
+            
+            # 최근 업데이트 기준으로 데이터 확인
+            cursor.execute("""
+                SELECT DATE(ugc_last_updated) as update_date,
+                       COUNT(*) as total_updates,
+                       COUNT(CASE WHEN tiktok_ugc_count IS NOT NULL THEN 1 END) as tiktok_updates,
+                       COUNT(CASE WHEN youtube_ugc_count IS NOT NULL THEN 1 END) as youtube_updates
+                FROM songs 
+                WHERE ugc_last_updated IS NOT NULL
+                GROUP BY DATE(ugc_last_updated)
+                ORDER BY update_date DESC
+                LIMIT 5
+            """)
+            recent_updates = cursor.fetchall()
+            
+            print("\n📊 최근 5일간 업데이트 현황:")
+            for update_date, total, tiktok, youtube in recent_updates:
+                print(f"   📅 {update_date}: 총 {total}곡 (TikTok {tiktok}곡, YouTube {youtube}곡)")
+        else:
+            print("❌ 업데이트 기록이 없습니다.")
+        
+        # 오늘 날짜 확인
+        today = datetime.now().strftime('%Y-%m-%d')
+        print(f"\n📅 오늘 날짜: {today}")
+        
+        # 오늘 업데이트된 데이터 확인
+        cursor.execute("""
+            SELECT title, artist, tiktok_ugc_count, youtube_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE DATE(ugc_last_updated) = ?
+            ORDER BY ugc_last_updated DESC
+            LIMIT 10
+        """, (today,))
+        today_updates = cursor.fetchall()
+        
+        print(f"\n🎯 오늘({today}) 업데이트 현황:")
+        if today_updates:
+            print(f"   📊 총 {len(today_updates)}곡 업데이트")
+            for song in today_updates:
+                tiktok_count = f"{song[2]:,}" if song[2] else "미수집"
+                youtube_count = f"{song[3]:,}" if song[3] else "미수집"
+                print(f"   🎵 {song[0]} - {song[1]}")
+                print(f"      TikTok: {tiktok_count}, YouTube: {youtube_count}")
+                print(f"      업데이트: {song[4]}")
+                print()
+        else:
+            print("   ❌ 오늘 업데이트된 데이터가 없습니다.")
+        
+        print("=" * 70)
+
+if __name__ == "__main__":
+    check_latest_updates()

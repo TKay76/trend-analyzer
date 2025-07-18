@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+단일 비디오 API 테스트 - 해시태그 정보 확인
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+def test_single_video_api():
+    """
+    단일 비디오 API로 해시태그 정보 확인
+    """
+    print("단일 비디오 API 테스트...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            # 페이지 로딩으로 인증 정보 획득
+            print("페이지 로딩...")
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            # 테스트할 비디오 ID (Hot 카테고리 1위)
+            test_video_id = "7523040630352743688"
+            
+            # API 호출
+            api_url = f"https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=1&secUid=&cursor=0&web_id=&item_id={test_video_id}"
+            
+            print(f"API 호출: {api_url}")
+            
+            response = page.request.get(api_url)
+            
+            if response.status == 200:
+                data = response.json()
+                print("API 응답 성공!")
+                
+                # 응답 구조 확인
+                print(f"응답 키: {list(data.keys())}")
+                
+                if 'itemList' in data and data['itemList']:
+                    video = data['itemList'][0]
+                    print(f"비디오 키: {list(video.keys())[:15]}...")
+                    
+                    # desc 필드 확인
+                    if 'desc' in video:
+                        desc = video['desc']
+                        print(f"desc 필드: {desc}")
+                        
+                        # 해시태그 추출
+                        hashtags = re.findall(r'#\w+', desc)
+                        print(f"추출된 해시태그: {hashtags}")
+                    
+                    # 작성자 정보
+                    if 'author' in video:
+                        author = video['author']
+                        print(f"작성자: {author.get('uniqueId', 'N/A')}")
+                    
+                    # 조회수 정보
+                    if 'stats' in video:
+                        stats = video['stats']
+                        print(f"stats: {stats}")
+                    
+                    if 'statsV2' in video:
+                        statsV2 = video['statsV2']
+                        print(f"statsV2: {statsV2}")
+                    
+                    # 전체 응답 저장
+                    with open(f"single_video_test_{test_video_id}.json", 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    print(f"전체 응답 저장: single_video_test_{test_video_id}.json")
+                
+                else:
+                    print("itemList가 비어있거나 없음")
+                    print(f"전체 응답: {data}")
+            
+            else:
+                print(f"API 호출 실패: Status {response.status}")
+                print(f"응답 텍스트: {response.text()[:200]}...")
+            
+            page.wait_for_timeout(5000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    test_single_video_api()

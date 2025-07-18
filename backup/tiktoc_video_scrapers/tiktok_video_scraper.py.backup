@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Video 스크래퍼
+https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en 에서
+상위 30개 비디오의 주소, 썸네일, 해시태그 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import sys
+import os
+
+def scrape_video_data(page, target_count=30):
+    """
+    비디오 데이터를 스크래핑하여 지정된 개수만큼 수집
+    """
+    scraped_videos = []
+    seen_videos = set()  # 중복 방지
+    
+    print(f"비디오 데이터 스크래핑 시작... (목표: {target_count}개)")
+    
+    while len(scraped_videos) < target_count:
+        # 페이지 스크롤
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(2000)
+        
+        # 비디오 아이템들을 찾기 위한 여러 셀렉터 시도
+        video_selectors = [
+            "div[class*='ItemCard']",  # 일반적인 아이템 카드
+            "div[class*='VideoItem']", # 비디오 전용
+            "div[class*='videoItem']",
+            "div[class*='ContentItem']",
+            "div[class*='item']",
+            ".video-item",
+            "[data-testid*='video']"
+        ]
+        
+        html_content = page.content()
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        video_items = []
+        used_selector = None
+        
+        # 적절한 셀렉터 찾기
+        for selector in video_selectors:
+            items = soup.select(selector)
+            if items and len(items) >= 4:  # 최소 4개 이상 있는 셀렉터
+                video_items = items
+                used_selector = selector
+                print(f"비디오 아이템 셀렉터 발견: {selector} ({len(items)}개)")
+                break
+        
+        if not video_items:
+            print("비디오 아이템을 찾을 수 없습니다. 다른 방법을 시도합니다...")
+            # 모든 div 요소 중에서 이미지와 링크가 있는 것들 찾기
+            all_divs = soup.select("div")
+            for div in all_divs:
+                if div.select("img") and div.select("a"):
+                    video_items.append(div)
+            
+            if video_items:
+                print(f"대체 방법으로 {len(video_items)}개 아이템 발견")
+            else:
+                print("비디오 아이템을 전혀 찾을 수 없습니다.")
+                break
+        
+        # 각 비디오 아이템에서 데이터 추출
+        new_items_found = False
+        for i, item in enumerate(video_items):
+            if len(scraped_videos) >= target_count:
+                break
+                
+            try:
+                # 1. 썸네일 이미지 추출
+                thumbnails = item.select("img")
+                thumbnail_url = ""
+                if thumbnails:
+                    thumbnail_url = thumbnails[0].get('src', '')
+                    # 상대 URL을 절대 URL로 변환
+                    if thumbnail_url.startswith('//'):
+                        thumbnail_url = 'https:' + thumbnail_url
+                    elif thumbnail_url.startswith('/'):
+                        thumbnail_url = 'https://ads.tiktok.com' + thumbnail_url
+                
+                # 2. 비디오 링크 추출
+                video_links = item.select("a")
+                video_url = ""
+                if video_links:
+                    video_url = video_links[0].get('href', '')
+                    # 상대 URL을 절대 URL로 변환
+                    if video_url.startswith('/'):
+                        video_url = 'https://ads.tiktok.com' + video_url
+                
+                # 3. 해시태그 추출
+                item_text = item.get_text()
+                hashtags = []
+                if '#' in item_text:
+                    words = item_text.split()
+                    hashtags = [word.strip('.,!?') for word in words if word.startswith('#')]
+                
+                # 4. 순위 정보 (가능하면)
+                rank = len(scraped_videos) + 1
+                rank_selectors = [
+                    "span[class*='rank']",
+                    "div[class*='rank']", 
+                    "span[class*='index']",
+                    "[class*='ranking']",
+                    ".rank"
+                ]
+                
+                for rank_sel in rank_selectors:
+                    rank_elem = item.select_one(rank_sel)
+                    if rank_elem:
+                        try:
+                            rank_text = rank_elem.get_text().strip()
+                            if rank_text.isdigit():
+                                rank = int(rank_text)
+                        except:
+                            pass
+                        break
+                
+                # 5. 추가 메타데이터
+                title = ""
+                description = ""
+                
+                # 제목이나 설명 찾기
+                text_elements = item.select("span, p, div")
+                for elem in text_elements:
+                    text = elem.get_text().strip()
+                    if text and not text.startswith('#') and len(text) > 5:
+                        if not title:
+                            title = text[:100]  # 첫 번째 텍스트를 제목으로
+                        elif not description and text != title:
+                            description = text[:200]  # 두 번째 텍스트를 설명으로
+                
+                # 중복 체크용 키
+                unique_key = f"{video_url}_{thumbnail_url}"
+                
+                if unique_key not in seen_videos and (video_url or thumbnail_url):
+                    video_data = {
+                        "rank": rank,
+                        "video_url": video_url,
+                        "thumbnail_url": thumbnail_url,
+                        "hashtags": hashtags,
+                        "title": title,
+                        "description": description,
+                        "raw_text": item_text[:300]  # 디버깅용
+                    }
+                    
+                    scraped_videos.append(video_data)
+                    seen_videos.add(unique_key)
+                    new_items_found = True
+                    
+                    print(f"비디오 {len(scraped_videos)}: {title[:30]}..." if title else f"비디오 {len(scraped_videos)}")
+                    
+            except Exception as e:
+                print(f"비디오 아이템 처리 중 오류: {e}")
+                continue
+        
+        if not new_items_found:
+            print("새로운 비디오 아이템이 없습니다. View More 버튼을 찾습니다...")
+            
+            # View More 버튼 찾기
+            view_more_selectors = [
+                "text=\"View More\"",
+                "button:has-text('View More')",
+                "[class*='view-more']",
+                "[class*='viewMore']",
+                "button[class*='more']",
+                ".more-button"
+            ]
+            
+            view_more_clicked = False
+            for selector in view_more_selectors:
+                try:
+                    view_more = page.query_selector(selector)
+                    if view_more and view_more.is_visible() and view_more.is_enabled():
+                        print(f"View More 버튼 클릭: {selector}")
+                        view_more.click()
+                        page.wait_for_timeout(3000)  # 로딩 대기
+                        view_more_clicked = True
+                        break
+                except Exception as e:
+                    continue
+            
+            if not view_more_clicked:
+                print("View More 버튼을 찾을 수 없거나 클릭할 수 없습니다. 스크래핑 종료.")
+                break
+    
+    print(f"스크래핑 완료: {len(scraped_videos)}개 비디오 수집")
+    return scraped_videos
+
+def scrape_tiktok_videos(target_count=30):
+    """
+    TikTok Creative Center에서 비디오 데이터 수집
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok Creative Center 비디오 스크래퍼 시작...")
+    print(f"URL: {target_url}")
+    print(f"목표: 상위 {target_count}개 비디오")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)  # 디버깅을 위해 headless=False
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩 중...")
+            # 더 안정적인 로딩 설정
+            page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(10000)  # 초기 로딩 대기
+            
+            print("페이지 로딩 완료. 데이터 스크래핑 시작...")
+            
+            # 비디오 데이터 스크래핑
+            videos = scrape_video_data(page, target_count)
+            
+            return videos
+            
+        except Exception as e:
+            print(f"스크래핑 중 오류 발생: {e}")
+            return []
+        
+        finally:
+            browser.close()
+
+def save_results(videos, filename="tiktok_videos_data.json"):
+    """
+    수집된 비디오 데이터를 JSON 파일로 저장
+    """
+    if videos:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump({
+                "total_count": len(videos),
+                "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "videos": videos
+            }, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n결과 저장 완료: {filename}")
+        print(f"총 {len(videos)}개 비디오 데이터")
+        
+        # 샘플 출력
+        print("\n=== 수집된 비디오 샘플 ===")
+        for i, video in enumerate(videos[:3]):
+            print(f"\n비디오 {i+1}:")
+            print(f"  순위: {video['rank']}")
+            print(f"  제목: {video['title']}")
+            print(f"  비디오 URL: {video['video_url']}")
+            print(f"  썸네일 URL: {video['thumbnail_url'][:50]}...")
+            print(f"  해시태그: {video['hashtags'][:3]}")
+    else:
+        print("수집된 데이터가 없습니다.")
+
+if __name__ == "__main__":
+    # 상위 30개 비디오 수집
+    videos = scrape_tiktok_videos(30)
+    
+    # 결과 저장
+    save_results(videos)
+    
+    print("\nTikTok 비디오 스크래핑 완료!")

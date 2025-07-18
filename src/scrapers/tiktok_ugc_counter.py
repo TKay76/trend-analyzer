@@ -51,6 +51,7 @@ def extract_hashtags_from_soup(soup):
         tag_match = re.search(r'/tag/([^/?#&]+)', href)
         if tag_match:
             hashtag = tag_match.group(1)
+            if hashtag.lower() == 'fyp': continue # FYP 제외
             hashtag_counter[hashtag] += 1
             logger.debug(f"📌 링크에서 해시태그: #{hashtag}")
         
@@ -58,6 +59,7 @@ def extract_hashtags_from_soup(soup):
         if text.startswith('#'):
             hashtag = text[1:].strip()
             if hashtag and len(hashtag) > 0:
+                if hashtag.lower() == 'fyp': continue # FYP 제외
                 hashtag_counter[hashtag] += 1
                 logger.debug(f"📌 링크 텍스트에서 해시태그: #{hashtag}")
     
@@ -66,6 +68,7 @@ def extract_hashtags_from_soup(soup):
     text_hashtags = re.findall(r'#(\w+)', all_text)
     for hashtag in text_hashtags:
         if len(hashtag) > 1:  # 한 글자는 제외
+            if hashtag.lower() == 'fyp': continue # FYP 제외
             hashtag_counter[hashtag] += 1
             logger.debug(f"📌 텍스트에서 해시태그: #{hashtag}")
     
@@ -91,6 +94,7 @@ def extract_hashtags_from_soup(soup):
                     tag_match = re.search(r'/tag/([^/?#&]+)', href)
                     if tag_match:
                         hashtag = tag_match.group(1)
+                        if hashtag.lower() == 'fyp': continue # FYP 제외
                         hashtag_counter[hashtag] += 1
                         logger.debug(f"📌 비디오 설명에서 해시태그: #{hashtag}")
             
@@ -99,6 +103,7 @@ def extract_hashtags_from_soup(soup):
             desc_hashtags = re.findall(r'#(\w+)', text)
             for hashtag in desc_hashtags:
                 if len(hashtag) > 1:
+                    if hashtag.lower() == 'fyp': continue # FYP 제외
                     hashtag_counter[hashtag] += 1
                     logger.debug(f"📌 설명 텍스트에서 해시태그: #{hashtag}")
     

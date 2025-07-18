@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Video 섹션 탐색 스크립트
+https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en 에서
+상위 30개 비디오의 주소, 썸네일, 해시태그 수집 가능성 탐색
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import sys
+import os
+
+def explore_tiktok_videos():
+    """
+    TikTok Creative Center의 Video 섹션을 탐색하여 데이터 구조 분석
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok Creative Center Video 섹션 탐색 시작...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)  # headless=False로 브라우저 창을 보면서 탐색
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩 중...")
+            page.goto(target_url, wait_until="networkidle")
+            page.wait_for_timeout(5000)  # 페이지 로딩 대기
+            
+            print("페이지 로딩 완료")
+            
+            # 페이지 스크롤하여 모든 콘텐츠 로드
+            print("\n페이지 스크롤 중...")
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(3000)
+            
+            # Video 탭이 있는지 확인
+            print("\nVideo 탭 찾는 중...")
+            
+            # 가능한 Video 탭 셀렉터들
+            video_tab_selectors = [
+                "span.ContentTab_itemLabelText__hiCCd:has-text('Video')",
+                "span:has-text('Video')",
+                "[data-testid*='video']",
+                "button:has-text('Video')",
+                "a:has-text('Video')"
+            ]
+            
+            video_tab_found = False
+            for selector in video_tab_selectors:
+                try:
+                    video_tab = page.query_selector(selector)
+                    if video_tab and video_tab.is_visible():
+                        print(f"✅ Video 탭 발견: {selector}")
+                        print(f"   텍스트: {video_tab.inner_text()}")
+                        video_tab.click()
+                        video_tab_found = True
+                        page.wait_for_timeout(3000)
+                        break
+                except Exception as e:
+                    continue
+            
+            if not video_tab_found:
+                print("❌ Video 탭을 찾을 수 없습니다. 페이지 구조를 분석합니다...")
+                
+                # 현재 페이지의 모든 탭과 섹션 분석
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # 모든 탭 찾기
+                print("\n📋 페이지에서 발견된 탭들:")
+                tabs = soup.select("span.ContentTab_itemLabelText__hiCCd")
+                if tabs:
+                    for i, tab in enumerate(tabs):
+                        print(f"   {i+1}. {tab.get_text().strip()}")
+                else:
+                    # 다른 탭 구조 찾기
+                    possible_tabs = soup.select("span:contains('Music'), span:contains('Video'), span:contains('Creator')")
+                    print("   대체 탭 구조:")
+                    for tab in possible_tabs[:5]:
+                        print(f"   - {tab.get_text().strip()}")
+            
+            # Music 탭에서 시작하여 다른 섹션들 탐색
+            print("\n🎵 현재 Music 섹션에서 데이터 구조 분석...")
+            
+            # 현재 페이지의 아이템 구조 분석
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Music 아이템들 분석
+            music_items = soup.select("div.ItemCard_soundItemContainer__GUmFb")
+            print(f"\n📊 Music 아이템 개수: {len(music_items)}")
+            
+            if music_items:
+                print("\n🔍 Music 아이템 구조 분석 (첫 번째 아이템):")
+                first_item = music_items[0]
+                
+                # 제목
+                title_tag = first_item.select_one("span.ItemCard_musicName__2znhM")
+                if title_tag:
+                    print(f"   제목: {title_tag.get_text().strip()}")
+                
+                # 아티스트
+                artist_tag = first_item.select_one("span.ItemCard_autherName__gdrue")
+                if artist_tag:
+                    print(f"   아티스트: {artist_tag.get_text().strip()}")
+                
+                # 순위
+                rank_tag = first_item.select_one("span.RankingStatus_rankingIndex__ZMDrH")
+                if rank_tag:
+                    print(f"   순위: {rank_tag.get_text().strip()}")
+                
+                # 썸네일/이미지
+                img_tags = first_item.select("img")
+                if img_tags:
+                    print(f"   이미지 개수: {len(img_tags)}")
+                    for i, img in enumerate(img_tags):
+                        src = img.get('src', '')
+                        alt = img.get('alt', '')
+                        print(f"     이미지 {i+1}: {src[:50]}... (alt: {alt})")
+                
+                # 링크들
+                links = first_item.select("a")
+                if links:
+                    print(f"   링크 개수: {len(links)}")
+                    for i, link in enumerate(links):
+                        href = link.get('href', '')
+                        print(f"     링크 {i+1}: {href}")
+            
+            # 페이지 네비게이션 시도 - Creative Center 메인 메뉴 찾기
+            print("\n🧭 Creative Center 메인 네비게이션 탐색...")
+            
+            # Creative Center 메뉴들 찾기
+            nav_selectors = [
+                "nav a",
+                "[role='navigation'] a",
+                ".navigation a",
+                "header a",
+                "[data-testid*='nav']"
+            ]
+            
+            for selector in nav_selectors:
+                try:
+                    nav_links = page.query_selector_all(selector)
+                    if nav_links:
+                        print(f"\n📍 네비게이션 링크들 ({selector}):")
+                        for i, link in enumerate(nav_links[:10]):  # 처음 10개만
+                            try:
+                                text = link.inner_text().strip()
+                                href = link.get_attribute('href')
+                                if text and ('video' in text.lower() or 'creator' in text.lower() or 'trend' in text.lower()):
+                                    print(f"   🎯 {text}: {href}")
+                            except:
+                                continue
+                        break
+                except Exception as e:
+                    continue
+            
+            # URL 구조 분석 - 다른 섹션 URL 추측
+            print("\n🔗 URL 패턴 분석:")
+            current_url = page.url
+            print(f"   현재 URL: {current_url}")
+            
+            # URL에서 'music'을 다른 키워드로 바꿔서 시도
+            base_url = current_url.replace('/music/', '/')
+            potential_urls = [
+                current_url.replace('/music/', '/video/'),
+                current_url.replace('/music/', '/creator/'),
+                current_url.replace('/music/', '/ads/'),
+                current_url.replace('/music/', '/content/'),
+                "https://ads.tiktok.com/business/creativecenter/inspiration/popular/video/pc/en",
+                "https://ads.tiktok.com/business/creativecenter/inspiration/popular/creator/pc/en"
+            ]
+            
+            print("\n🎯 시도해볼 URL들:")
+            for url in potential_urls:
+                print(f"   - {url}")
+            
+            # 실제로 Video URL에 접속 시도
+            print("\n🚀 Video 섹션 URL 접속 시도...")
+            video_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/video/pc/en"
+            
+            try:
+                print(f"   이동 중: {video_url}")
+                page.goto(video_url, wait_until="networkidle")
+                page.wait_for_timeout(5000)
+                
+                print("✅ Video 섹션 접속 성공!")
+                
+                # Video 섹션의 데이터 구조 분석
+                print("\n🎬 Video 섹션 데이터 구조 분석...")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(3000)
+                
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # Video 아이템들 찾기 - 여러 가능한 셀렉터 시도
+                video_selectors = [
+                    "div[class*='VideoItem']",
+                    "div[class*='videoItem']", 
+                    "div[class*='Video']",
+                    "div[class*='ItemCard']",
+                    "div[class*='ContentItem']",
+                    "div[class*='item']",
+                    "[data-testid*='video']"
+                ]
+                
+                video_items = []
+                used_selector = None
+                
+                for selector in video_selectors:
+                    items = soup.select(selector)
+                    if items and len(items) > 5:  # 충분한 아이템이 있는 셀렉터
+                        video_items = items
+                        used_selector = selector
+                        break
+                
+                if video_items:
+                    print(f"✅ Video 아이템 발견! (셀렉터: {used_selector})")
+                    print(f"   아이템 개수: {len(video_items)}")
+                    
+                    # 첫 번째 비디오 아이템 상세 분석
+                    print(f"\n🔍 첫 번째 비디오 아이템 구조:")
+                    first_video = video_items[0]
+                    
+                    # 썸네일 이미지
+                    thumbnails = first_video.select("img")
+                    print(f"   썸네일 개수: {len(thumbnails)}")
+                    for i, img in enumerate(thumbnails):
+                        src = img.get('src', '')
+                        alt = img.get('alt', '')
+                        print(f"     썸네일 {i+1}: {src[:60]}...")
+                        print(f"                  Alt: {alt}")
+                    
+                    # 비디오 링크
+                    video_links = first_video.select("a")
+                    print(f"   링크 개수: {len(video_links)}")
+                    for i, link in enumerate(video_links):
+                        href = link.get('href', '')
+                        if href:
+                            print(f"     링크 {i+1}: {href}")
+                    
+                    # 텍스트 콘텐츠 (해시태그 등)
+                    all_text = first_video.get_text()
+                    if '#' in all_text:
+                        print(f"   해시태그 포함 가능성: ✅")
+                        # 해시태그 추출 시도
+                        words = all_text.split()
+                        hashtags = [word for word in words if word.startswith('#')]
+                        if hashtags:
+                            print(f"   발견된 해시태그: {hashtags[:5]}")
+                    else:
+                        print(f"   해시태그 포함 가능성: ❌")
+                    
+                    # 순위 정보
+                    rank_selectors = [
+                        "span[class*='rank']",
+                        "div[class*='rank']", 
+                        "span[class*='index']",
+                        "[class*='ranking']"
+                    ]
+                    
+                    for rank_sel in rank_selectors:
+                        rank_elem = first_video.select_one(rank_sel)
+                        if rank_elem:
+                            print(f"   순위 정보: {rank_elem.get_text().strip()}")
+                            break
+                    
+                    # View More 버튼 확인
+                    print(f"\n🔄 View More 버튼 탐색...")
+                    view_more_selectors = [
+                        "text=\"View More\"",
+                        "button:has-text('View More')",
+                        "[class*='view-more']",
+                        "[class*='viewMore']"
+                    ]
+                    
+                    view_more_found = False
+                    for vm_selector in view_more_selectors:
+                        try:
+                            view_more = page.query_selector(vm_selector)
+                            if view_more and view_more.is_visible():
+                                print(f"   ✅ View More 버튼 발견: {vm_selector}")
+                                view_more_found = True
+                                break
+                        except:
+                            continue
+                    
+                    if not view_more_found:
+                        print(f"   ❌ View More 버튼 없음 - 모든 아이템이 로드되었을 가능성")
+                    
+                    # 샘플 데이터 수집 시연
+                    print(f"\n📊 상위 5개 비디오 샘플 데이터:")
+                    for i, item in enumerate(video_items[:5]):
+                        print(f"\n   비디오 {i+1}:")
+                        
+                        # 썸네일
+                        thumb = item.select_one("img")
+                        if thumb:
+                            thumb_src = thumb.get('src', '')
+                            print(f"     썸네일: {thumb_src[:50]}...")
+                        
+                        # 링크
+                        link = item.select_one("a")
+                        if link:
+                            href = link.get('href', '')
+                            print(f"     비디오 링크: {href}")
+                        
+                        # 텍스트에서 해시태그 추출
+                        text = item.get_text()
+                        hashtags = [word for word in text.split() if word.startswith('#')]
+                        if hashtags:
+                            print(f"     해시태그: {hashtags[:3]}")
+                        
+                else:
+                    print("❌ Video 아이템을 찾을 수 없습니다.")
+                    print("   페이지 소스 일부:")
+                    print(soup.get_text()[:200] + "...")
+                
+            except Exception as e:
+                print(f"❌ Video 섹션 접속 실패: {e}")
+            
+            print("\n⏸️  브라우저를 10초간 열어둡니다. 페이지를 직접 확인해보세요...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"❌ 탐색 중 오류 발생: {e}")
+        
+        finally:
+            browser.close()
+    
+    print("\n🎉 TikTok Creative Center Video 섹션 탐색 완료!")
+
+if __name__ == "__main__":
+    explore_tiktok_videos()

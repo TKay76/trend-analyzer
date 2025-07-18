@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 4개 카테고리 결과 통합
+Hot, Likes, Comments, Shares 카테고리별 30개씩 총 120개 비디오
+"""
+
+import json
+import time
+
+def combine_all_categories():
+    """
+    4개 카테고리의 개별 결과 파일을 하나로 통합
+    """
+    print("TikTok 4개 카테고리 결과 통합...")
+    
+    # 4개 카테고리 파일 이름
+    category_files = [
+        {"file": "tiktok_hot_category_30.json", "category": "Hot"},
+        {"file": "tiktok_likes_category_30.json", "category": "Likes"},
+        {"file": "tiktok_comments_category_30.json", "category": "Comments"},
+        {"file": "tiktok_shares_category_30.json", "category": "Shares"}
+    ]
+    
+    all_results = {}
+    total_videos = 0
+    
+    # 각 카테고리 파일 읽기
+    for cat_info in category_files:
+        filename = cat_info["file"]
+        category = cat_info["category"]
+        
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            all_results[category] = data
+            video_count = len(data.get("videos", []))
+            total_videos += video_count
+            
+            print(f"OK {category}: {video_count}/30개 로드 완료")
+            
+        except FileNotFoundError:
+            print(f"WARNING {filename} 파일을 찾을 수 없음")
+            all_results[category] = {"scrape_info": {"total_videos": 0}, "videos": []}
+        except Exception as e:
+            print(f"WARNING {filename} 로드 실패: {e}")
+            all_results[category] = {"scrape_info": {"total_videos": 0}, "videos": []}
+    
+    # 통합 결과 생성
+    combined_result = {
+        "scrape_info": {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "target_url": "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            "categories_scraped": list(all_results.keys()),
+            "total_videos_all_categories": total_videos,
+            "target_per_category": 30,
+            "summary": {
+                cat_name: len(cat_data.get("videos", [])) 
+                for cat_name, cat_data in all_results.items()
+            },
+            "success_rate": f"{total_videos}/120 ({total_videos/120*100:.1f}%)"
+        },
+        "categories": all_results
+    }
+    
+    # 통합 파일 저장
+    filename = "tiktok_all_categories_120_videos_final.json"
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(combined_result, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n{'='*70}")
+    print(f"TikTok 4개 카테고리 수집 완료!")
+    print(f"{'='*70}")
+    print(f"통합 결과 파일: {filename}")
+    print(f"전체 수집 비디오: {total_videos}/120개")
+    print(f"목표 달성률: {total_videos/120*100:.1f}%")
+    
+    print(f"\n카테고리별 수집 결과:")
+    for cat_name, count in combined_result['scrape_info']['summary'].items():
+        percentage = count/30*100 if count > 0 else 0
+        status = "OK" if count == 30 else "WARNING"
+        print(f"   {status} {cat_name}: {count}/30개 ({percentage:.1f}%)")
+    
+    # 각 카테고리별 첫 번째 비디오 ID 확인 (서로 다른지 검증)
+    print(f"\n카테고리별 1위 비디오 (다른 순위 확인):")
+    for cat_name, cat_data in all_results.items():
+        videos = cat_data.get("videos", [])
+        if videos:
+            first_video = videos[0]
+            print(f"   {cat_name}: {first_video['video_id']}")
+        else:
+            print(f"   {cat_name}: 데이터 없음")
+    
+    if total_videos == 120:
+        print(f"\n축하합니다! 모든 카테고리에서 30개씩 완벽 수집!")
+        print(f"   - Hot, Likes, Comments, Shares 각각 30개")
+        print(f"   - 총 120개 TikTok 비디오 데이터")
+        print(f"   - 비디오 ID, URL, 썸네일, 카테고리 정보 포함")
+    else:
+        print(f"\n수집 현황: {total_videos}/120개")
+        missing = 120 - total_videos
+        print(f"   부족한 비디오: {missing}개")
+    
+    print(f"\n완료 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return combined_result
+
+if __name__ == "__main__":
+    result = combine_all_categories()
+    print("\n4개 카테고리 통합 완료!")

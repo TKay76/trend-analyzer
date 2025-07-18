@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 2개 카테고리 테스트
+Hot과 Likes만 각각 10개씩 빠르게 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def test_2_categories():
+    """
+    Hot과 Likes 카테고리에서 각각 10개씩 빠른 테스트
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    categories = [
+        {"name": "Hot", "selector": None, "description": "기본 인기 순위"},
+        {"name": "Likes", "selector": 'text="Likes"', "description": "좋아요 순"}
+    ]
+    
+    print("TikTok 2개 카테고리 테스트...")
+    print(f"목표: 각 카테고리당 10개씩")
+    
+    all_results = {}
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print(f"\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(8000)
+            
+            for cat_index, category in enumerate(categories):
+                cat_name = category['name']
+                cat_selector = category['selector']
+                
+                print(f"\n--- 카테고리 {cat_index + 1}/2: {cat_name} ---")
+                
+                # Hot이 아닌 경우 정렬 옵션 변경
+                if cat_selector:
+                    print(f"정렬을 {cat_name}으로 변경...")
+                    
+                    try:
+                        # 정렬 드롭다운 클릭
+                        sort_button = page.query_selector('span.ListFilter_sortWrapSelectLabel__VCgtO')
+                        if sort_button:
+                            sort_button.click()
+                            page.wait_for_timeout(2000)
+                            
+                            # 카테고리 옵션 클릭
+                            category_option = page.query_selector(cat_selector)
+                            if category_option and category_option.is_visible():
+                                category_option.click()
+                                page.wait_for_timeout(4000)
+                                print(f"{cat_name} 정렬 적용 완료!")
+                            else:
+                                print(f"⚠️ {cat_name} 옵션 찾기 실패")
+                                continue
+                        else:
+                            print("⚠️ 정렬 드롭다운 찾기 실패")
+                            continue
+                    except Exception as e:
+                        print(f"⚠️ 정렬 변경 실패: {e}")
+                        continue
+                
+                # 비디오 수집 (최대 10개)
+                scraped_videos = []
+                seen_video_ids = set()
+                
+                # 1-2번만 수집 시도
+                for attempt in range(2):
+                    print(f"{cat_name} - 수집 시도 {attempt + 1}")
+                    
+                    # 스크롤
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(2000)
+                    
+                    # HTML 분석
+                    try:
+                        page.wait_for_selector("div.CommonGridLayoutDataList_cardWrapper__jkA9g", timeout=10000)
+                    except:
+                        print("비디오 카드 로딩 실패")
+                        break
+                    
+                    html_content = page.content()
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    video_cards = soup.select("div.CommonGridLayoutDataList_cardWrapper__jkA9g")
+                    
+                    print(f"  {len(video_cards)}개 카드 발견")
+                    
+                    new_count = 0
+                    for card in video_cards:
+                        embed_quote = card.select_one("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                        if not embed_quote:
+                            continue
+                        
+                        video_id = embed_quote.get('data-video-id', '')
+                        if not video_id or video_id in seen_video_ids:
+                            continue
+                        
+                        seen_video_ids.add(video_id)
+                        
+                        tiktok_url = embed_quote.get('cite', '')
+                        
+                        video_data = {
+                            "rank": len(scraped_videos) + 1,
+                            "category": cat_name,
+                            "video_id": video_id,
+                            "tiktok_url": tiktok_url,
+                            "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        scraped_videos.append(video_data)
+                        new_count += 1
+                        
+                        print(f"    {cat_name} #{len(scraped_videos)}: {video_id}")
+                        
+                        if len(scraped_videos) >= 10:
+                            break
+                    
+                    print(f"  이번 시도에서 {new_count}개 추가")
+                    
+                    if len(scraped_videos) >= 10:
+                        print(f"{cat_name} - 목표 10개 달성!")
+                        break
+                    
+                    # View More 클릭
+                    try:
+                        view_more = page.query_selector("text=\"View More\"")
+                        if view_more and view_more.is_visible():
+                            view_more.click()
+                            page.wait_for_timeout(3000)
+                            print(f"  View More 클릭 완료")
+                        else:
+                            print(f"  View More 버튼 없음")
+                            break
+                    except:
+                        print(f"  View More 클릭 실패")
+                        break
+                
+                # 결과 저장
+                all_results[cat_name] = {
+                    "category": cat_name,
+                    "total_videos": len(scraped_videos),
+                    "videos": scraped_videos
+                }
+                
+                print(f"{cat_name} 완료: {len(scraped_videos)}개 수집")
+                
+                # 카테고리 간 대기
+                if cat_index == 0:
+                    print("다음 카테고리로 이동...")
+                    time.sleep(3)
+            
+            # 최종 결과
+            result = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "total_videos": sum(len(cat['videos']) for cat in all_results.values()),
+                "categories": all_results
+            }
+            
+            filename = "test_2_categories_result.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n=== 테스트 완료 ===")
+            print(f"결과 파일: {filename}")
+            print(f"전체 수집: {result['total_videos']}개")
+            
+            for cat_name, cat_data in all_results.items():
+                print(f"  {cat_name}: {cat_data['total_videos']}개")
+                if cat_data['videos']:
+                    print(f"    첫 번째: {cat_data['videos'][0]['video_id']}")
+            
+            print("\n10초 후 브라우저 종료...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"오류: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("2개 카테고리 테스트 완료!")
+
+if __name__ == "__main__":
+    test_2_categories()

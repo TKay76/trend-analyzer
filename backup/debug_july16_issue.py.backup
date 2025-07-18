@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""
+7월 16일 데이터베이스 저장 문제 디버깅 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+from datetime import datetime
+
+def debug_july16_issue():
+    """7월 16일 데이터베이스 저장 문제 디버깅"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 70)
+        print("🔍 7월 16일 데이터베이스 저장 문제 디버깅")
+        print("=" * 70)
+        
+        # 1. 전체 곡 수 확인
+        cursor.execute("SELECT COUNT(*) FROM songs")
+        total_songs = cursor.fetchone()[0]
+        print(f"📊 총 곡 수: {total_songs}개")
+        
+        # 2. TikTok ID가 있는 곡 수 확인
+        cursor.execute("SELECT COUNT(*) FROM songs WHERE tiktok_id IS NOT NULL")
+        tiktok_songs = cursor.fetchone()[0]
+        print(f"🎭 TikTok ID 보유 곡: {tiktok_songs}개")
+        
+        # 3. 최근 추가된 곡 확인 (7월 16일)
+        cursor.execute("""
+            SELECT title, artist, tiktok_id, created_at
+            FROM songs 
+            WHERE DATE(created_at) = '2025-07-16'
+            ORDER BY created_at DESC
+            LIMIT 10
+        """)
+        new_songs = cursor.fetchall()
+        
+        print(f"\n📅 7월 16일 새로 추가된 곡: {len(new_songs)}개")
+        if new_songs:
+            for i, song in enumerate(new_songs, 1):
+                print(f"   {i}. {song[0]} - {song[1]} (ID: {song[2]}) - {song[3]}")
+        
+        # 4. 기존 곡 중 TikTok ID 있지만 UGC 없는 곡 확인
+        cursor.execute("""
+            SELECT title, artist, tiktok_id, ugc_last_updated
+            FROM songs 
+            WHERE tiktok_id IS NOT NULL 
+              AND tiktok_ugc_count IS NULL
+            ORDER BY id DESC
+            LIMIT 10
+        """)
+        missing_ugc = cursor.fetchall()
+        
+        print(f"\n⚠️ TikTok ID 있지만 UGC 미수집 곡: {len(missing_ugc)}개")
+        if missing_ugc:
+            for i, song in enumerate(missing_ugc, 1):
+                print(f"   {i}. {song[0]} - {song[1]} (ID: {song[2]}) - 마지막 업데이트: {song[3]}")
+        
+        # 5. 중복 데이터 처리 확인
+        cursor.execute("""
+            SELECT tiktok_id, COUNT(*) as count
+            FROM songs 
+            WHERE tiktok_id IS NOT NULL
+            GROUP BY tiktok_id
+            HAVING COUNT(*) > 1
+        """)
+        duplicates = cursor.fetchall()
+        
+        print(f"\n🔄 중복 TikTok ID: {len(duplicates)}개")
+        if duplicates:
+            for tiktok_id, count in duplicates:
+                print(f"   ID {tiktok_id}: {count}개 곡")
+                
+                # 중복 곡 상세 정보
+                cursor.execute("""
+                    SELECT id, title, artist, tiktok_ugc_count, ugc_last_updated
+                    FROM songs 
+                    WHERE tiktok_id = ?
+                    ORDER BY id
+                """, (tiktok_id,))
+                dup_songs = cursor.fetchall()
+                
+                for song in dup_songs:
+                    ugc_status = f"{song[3]:,}" if song[3] else "미수집"
+                    print(f"      → {song[0]}: {song[1]} - {song[2]} (UGC: {ugc_status}) - {song[4]}")
+        
+        # 6. 해시태그 테이블 확인
+        cursor.execute("SELECT COUNT(*) FROM song_hashtags")
+        total_hashtags = cursor.fetchone()[0]
+        print(f"\n📌 총 해시태그 수: {total_hashtags}개")
+        
+        cursor.execute("""
+            SELECT COUNT(DISTINCT song_id) 
+            FROM song_hashtags 
+            WHERE collected_date = '2025-07-16'
+        """)
+        july16_hashtag_songs = cursor.fetchone()[0]
+        print(f"📅 7월 16일 해시태그 수집 곡: {july16_hashtag_songs}개")
+        
+        # 7. 데이터베이스 스키마 확인
+        cursor.execute("PRAGMA table_info(songs)")
+        schema = cursor.fetchall()
+        print(f"\n📋 songs 테이블 스키마:")
+        for column in schema:
+            print(f"   {column[1]}: {column[2]} (null: {column[3]})")
+        
+        print("=" * 70)
+
+if __name__ == "__main__":
+    debug_july16_issue()

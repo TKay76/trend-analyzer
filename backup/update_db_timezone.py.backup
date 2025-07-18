@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""
+데이터베이스 시간 데이터를 로컬시간으로 변환하는 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+
+def update_db_timezone():
+    """데이터베이스의 시간 데이터를 로컬시간으로 변환"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 70)
+        print("🕐 데이터베이스 시간 데이터 로컬시간 변환")
+        print("=" * 70)
+        
+        # 1. songs 테이블의 created_at 컬럼 업데이트
+        print("📊 songs 테이블 created_at 업데이트 중...")
+        cursor.execute("""
+            UPDATE songs 
+            SET created_at = datetime(created_at, 'localtime')
+            WHERE created_at IS NOT NULL
+        """)
+        songs_updated = cursor.rowcount
+        print(f"   ✅ {songs_updated}개 레코드 업데이트 완료")
+        
+        # 2. songs 테이블의 ugc_last_updated 컬럼 업데이트
+        print("📊 songs 테이블 ugc_last_updated 업데이트 중...")
+        cursor.execute("""
+            UPDATE songs 
+            SET ugc_last_updated = datetime(ugc_last_updated, 'localtime')
+            WHERE ugc_last_updated IS NOT NULL
+        """)
+        ugc_updated = cursor.rowcount
+        print(f"   ✅ {ugc_updated}개 레코드 업데이트 완료")
+        
+        # 3. daily_trends 테이블의 date 컬럼 업데이트
+        print("📊 daily_trends 테이블 date 업데이트 중...")
+        cursor.execute("""
+            UPDATE daily_trends 
+            SET date = date(date, 'localtime')
+            WHERE date IS NOT NULL
+        """)
+        trends_updated = cursor.rowcount
+        print(f"   ✅ {trends_updated}개 레코드 업데이트 완료")
+        
+        # 4. song_hashtags 테이블의 collected_date 컬럼 업데이트
+        print("📊 song_hashtags 테이블 collected_date 업데이트 중...")
+        cursor.execute("""
+            UPDATE song_hashtags 
+            SET collected_date = date(collected_date, 'localtime')
+            WHERE collected_date IS NOT NULL
+        """)
+        hashtags_updated = cursor.rowcount
+        print(f"   ✅ {hashtags_updated}개 레코드 업데이트 완료")
+        
+        # 변경사항 커밋
+        conn.commit()
+        
+        print("\n🎯 변환 완료 요약:")
+        print(f"   📊 songs.created_at: {songs_updated}개")
+        print(f"   📊 songs.ugc_last_updated: {ugc_updated}개")
+        print(f"   📊 daily_trends.date: {trends_updated}개")
+        print(f"   📊 song_hashtags.collected_date: {hashtags_updated}개")
+        
+        # 5. 변환 후 검증 - 7월 16일 데이터 확인
+        print("\n🔍 변환 후 검증:")
+        
+        # 7월 16일 UGC 업데이트 확인
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM songs 
+            WHERE DATE(ugc_last_updated) = '2025-07-16'
+        """)
+        july16_ugc = cursor.fetchone()[0]
+        print(f"   📅 7월 16일 UGC 업데이트: {july16_ugc}개")
+        
+        # 7월 16일 해시태그 수집 확인
+        cursor.execute("""
+            SELECT COUNT(DISTINCT song_id) 
+            FROM song_hashtags 
+            WHERE collected_date = '2025-07-16'
+        """)
+        july16_hashtags = cursor.fetchone()[0]
+        print(f"   📅 7월 16일 해시태그 수집: {july16_hashtags}개")
+        
+        # 7월 16일 해시태그 총 개수 확인
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM song_hashtags 
+            WHERE collected_date = '2025-07-16'
+        """)
+        july16_hashtag_count = cursor.fetchone()[0]
+        print(f"   📅 7월 16일 총 해시태그: {july16_hashtag_count}개")
+        
+        print("=" * 70)
+        print("✅ 데이터베이스 시간 변환 완료!")
+        print("=" * 70)
+
+if __name__ == "__main__":
+    update_db_timezone()

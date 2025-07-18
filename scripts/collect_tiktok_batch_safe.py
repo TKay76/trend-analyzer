@@ -27,10 +27,11 @@ class TikTokBatchCollector:
         self.progress_file = "progress_tiktok.json"
         
         # Python 실행 파일 경로 (Windows/Linux 자동 감지)
+        project_root = os.path.join(os.path.dirname(__file__), '..')
         if os.name == 'nt':  # Windows
-            self.python_exe = os.path.join(os.path.dirname(__file__), 'venv', 'Scripts', 'python.exe')
+            self.python_exe = os.path.join(project_root, 'venv', 'Scripts', 'python.exe')
         else:  # Linux/WSL
-            self.python_exe = os.path.join(os.path.dirname(__file__), 'test_env', 'bin', 'python')
+            self.python_exe = os.path.join(project_root, 'venv', 'bin', 'python')
         
         # Python 실행 파일 존재 확인
         if not os.path.exists(self.python_exe):
@@ -98,9 +99,19 @@ class TikTokBatchCollector:
                 logger.info(f"   📝 재시도 {retry_count}/{self.max_retries}")
             
             # TikTok UGC 카운터 실행
+            project_root = os.path.join(os.path.dirname(__file__), '..')
+            script_path = os.path.join(project_root, 'src', 'scrapers', 'tiktok_ugc_counter.py')
+            
+            # 환경변수 설정
+            env = os.environ.copy()
+            env['PYTHONPATH'] = project_root
+            env['PYTHONIOENCODING'] = 'utf-8'
+            env['PYTHONUTF8'] = '1'
+            
             result = subprocess.run([
-                self.python_exe, 'src/scrapers/tiktok_ugc_counter.py', tiktok_url, '--save-db'
-            ], capture_output=True, text=True, timeout=self.timeout_per_song)
+                self.python_exe, script_path, tiktok_url, '--save-db'
+            ], capture_output=True, text=True, timeout=self.timeout_per_song, 
+               cwd=project_root, env=env)
             
             if result.returncode == 0:
                 logger.info(f"   ✅ 수집 완료: {song_info}")

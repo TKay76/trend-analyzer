@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+이전에 성공했던 API 방법 연구 및 재현
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+def extract_hashtags_from_desc(desc):
+    """
+    비디오 설명에서 해시태그 추출
+    """
+    if not desc:
+        return []
+    
+    hashtags = re.findall(r'#\w+', desc)
+    return hashtags
+
+def research_working_api():
+    """
+    이전에 성공했던 API 방법 연구
+    """
+    print("이전 성공한 API 방법 연구...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            # 1. 먼저 페이지를 로드해서 쿠키와 헤더를 얻습니다
+            print("페이지 로딩으로 인증 정보 획득...")
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 2. 이전에 성공했던 API URL 패턴들 시도
+            test_apis = [
+                # 이전 성공한 패턴
+                "https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=24&secUid=MS4wLjABAAAAplov3bw6JwAPxa9vOgAQs0IYguj0MnfVkuT1xAeGCs0&lang=en",
+                
+                # 다른 secUid로 시도
+                "https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=10&secUid=&cursor=0",
+                
+                # 파라미터 조합 변경
+                "https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=20",
+                
+                # Creative Center API 직접 시도
+                "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=10&order_by=vv&country_code=KR",
+            ]
+            
+            for i, api_url in enumerate(test_apis):
+                print(f"\n=== API 테스트 #{i+1} ===")
+                print(f"URL: {api_url}")
+                
+                try:
+                    response = page.request.get(api_url, timeout=10000)
+                    print(f"상태 코드: {response.status}")
+                    
+                    if response.status == 200:
+                        data = response.json()
+                        print("성공! 응답 데이터 분석...")
+                        
+                        # 응답 구조 분석
+                        print(f"응답 키: {list(data.keys())}")
+                        
+                        # 비디오 데이터 찾기
+                        video_data = None
+                        if 'items' in data:
+                            video_data = data['items']
+                            print(f"'items' 필드에서 {len(video_data)}개 비디오 발견")
+                        elif 'itemList' in data:
+                            video_data = data['itemList']
+                            print(f"'itemList' 필드에서 {len(video_data)}개 비디오 발견")
+                        elif 'data' in data:
+                            video_data = data['data']
+                            print(f"'data' 필드에서 데이터 발견")
+                        
+                        # 비디오 데이터 분석
+                        if video_data and isinstance(video_data, list) and len(video_data) > 0:
+                            first_video = video_data[0]
+                            print(f"첫 번째 비디오 키: {list(first_video.keys())[:10]}...")
+                            
+                            # desc 필드 확인
+                            if 'desc' in first_video:
+                                desc = first_video['desc']
+                                print(f"desc 필드 발견: {desc[:100]}...")
+                                hashtags = extract_hashtags_from_desc(desc)
+                                print(f"해시태그: {hashtags}")
+                            
+                            # 통계 정보 확인
+                            if 'stats' in first_video:
+                                stats = first_video['stats']
+                                print(f"stats: {stats}")
+                            
+                            if 'statsV2' in first_video:
+                                statsV2 = first_video['statsV2']
+                                print(f"statsV2: {statsV2}")
+                            
+                            # 작성자 정보 확인
+                            if 'author' in first_video:
+                                author = first_video['author']
+                                print(f"작성자: {author.get('uniqueId', 'N/A')}")
+                            
+                            # 성공한 응답 저장
+                            filename = f"successful_api_response_{i+1}.json"
+                            with open(filename, 'w', encoding='utf-8') as f:
+                                json.dump(data, f, ensure_ascii=False, indent=2)
+                            print(f"성공한 응답 저장: {filename}")
+                            
+                            # 첫 번째 성공하면 해당 API 패턴을 더 자세히 테스트
+                            if 'desc' in first_video and first_video['desc']:
+                                print(f"\n*** API #{i+1} 성공! 해시태그 수집 가능 ***")
+                                return api_url, data
+                        
+                        else:
+                            print("비디오 데이터가 없거나 올바르지 않음")
+                    
+                    else:
+                        print(f"실패: HTTP {response.status}")
+                        error_text = response.text()[:200]
+                        print(f"오류 텍스트: {error_text}...")
+                
+                except Exception as e:
+                    print(f"API 호출 실패: {e}")
+                
+                # API 호출 간 딜레이
+                time.sleep(2)
+            
+            print(f"\n모든 API 테스트 완료. 성공한 API가 없습니다.")
+            
+            # 마지막으로 네트워크 탭에서 실제 요청들을 캡처해보기
+            print(f"\n페이지에서 실제 네트워크 요청 모니터링...")
+            
+            # 페이지 새로고침해서 네트워크 요청 캡처
+            network_requests = []
+            
+            def handle_request(request):
+                if 'api' in request.url or 'tiktok' in request.url:
+                    network_requests.append({
+                        'url': request.url,
+                        'method': request.method,
+                        'headers': dict(request.headers)
+                    })
+            
+            page.on('request', handle_request)
+            
+            print("페이지 새로고침으로 네트워크 요청 캡처...")
+            page.reload()
+            page.wait_for_timeout(10000)
+            
+            # 캡처된 요청들 분석
+            print(f"\n캡처된 API 요청들 ({len(network_requests)}개):")
+            for i, req in enumerate(network_requests):
+                print(f"  {i+1}. {req['method']} {req['url']}")
+            
+            # API 관련 요청들만 필터링
+            api_requests = [req for req in network_requests if 'api' in req['url'].lower()]
+            print(f"\nAPI 요청들 ({len(api_requests)}개):")
+            for i, req in enumerate(api_requests):
+                print(f"  {i+1}. {req['url']}")
+            
+            page.wait_for_timeout(5000)
+            
+        except Exception as e:
+            print(f"전체 오류: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    research_working_api()

@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Videos 탭 클릭 후 실제 비디오 콘텐츠 확인
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def click_videos_tab_and_explore():
+    """
+    Videos 탭을 클릭한 후 실제 비디오 콘텐츠 확인
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok Videos 탭 클릭 탐색...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            print("페이지 로딩 완료")
+            
+            # Videos 탭 찾기 및 클릭
+            print("\nVideos 탭 찾는 중...")
+            videos_tab_selectors = [
+                "text=\"TikTok Videos\"",
+                "text=\"Videos\"", 
+                "[class*='video']",
+                "a:has-text('Video')",
+                "button:has-text('Video')"
+            ]
+            
+            videos_tab_clicked = False
+            for selector in videos_tab_selectors:
+                try:
+                    videos_tab = page.query_selector(selector)
+                    if videos_tab and videos_tab.is_visible():
+                        print(f"Videos 탭 발견: {selector}")
+                        videos_tab.click()
+                        videos_tab_clicked = True
+                        print("Videos 탭 클릭 완료!")
+                        page.wait_for_timeout(3000)
+                        break
+                except Exception as e:
+                    continue
+            
+            if not videos_tab_clicked:
+                print("Videos 탭을 찾지 못함. 현재 페이지 상태 확인...")
+            
+            # 페이지 스크롤해서 콘텐츠 로드
+            print("\n페이지 스크롤...")
+            for i in range(3):
+                print(f"스크롤 {i+1}/3...")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(2000)
+            
+            # HTML 분석
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # 비디오 관련 요소들 찾기
+            print("\n비디오 콘텐츠 찾는 중...")
+            
+            # 다양한 비디오 셀렉터 시도
+            video_content_selectors = [
+                "[class*='VideoCard']",
+                "[class*='video-item']", 
+                "[class*='item-card']",
+                "div[class*='card']",
+                "video",
+                "iframe[src*='tiktok']",
+                "[data-testid*='video']",
+                "img[src*='tiktok']"
+            ]
+            
+            found_videos = {}
+            for selector in video_content_selectors:
+                items = soup.select(selector)
+                if items:
+                    found_videos[selector] = len(items)
+                    print(f"{selector}: {len(items)}개 발견")
+            
+            # 실제 TikTok 비디오 링크나 이미지가 있는지 확인
+            print("\nTikTok 콘텐츠 링크 분석...")
+            all_links = soup.select("a[href*='tiktok.com']")
+            print(f"TikTok.com 링크: {len(all_links)}개")
+            
+            all_images = soup.select("img[src*='tiktok']")
+            print(f"TikTok 이미지: {len(all_images)}개")
+            
+            # 상위 몇 개 분석
+            video_data = []
+            if found_videos:
+                best_selector = max(found_videos, key=found_videos.get)
+                best_items = soup.select(best_selector)
+                print(f"\n최적 셀렉터 분석: {best_selector} ({len(best_items)}개)")
+                
+                for i, item in enumerate(best_items[:5]):
+                    print(f"\n=== 아이템 {i+1} 분석 ===")
+                    
+                    # 썸네일
+                    images = item.select("img")
+                    thumbnail = ""
+                    if images:
+                        thumbnail = images[0].get('src', '')
+                        if thumbnail.startswith('//'):
+                            thumbnail = 'https:' + thumbnail
+                        print(f"썸네일: {thumbnail[:60]}...")
+                    
+                    # 링크
+                    links = item.select("a")
+                    video_link = ""
+                    if links:
+                        video_link = links[0].get('href', '')
+                        if video_link.startswith('/'):
+                            video_link = 'https://ads.tiktok.com' + video_link
+                        print(f"링크: {video_link[:60]}...")
+                    
+                    # 텍스트
+                    text = item.get_text().strip()
+                    hashtags = [word.strip('.,!?') for word in text.split() if word.startswith('#')]
+                    
+                    if hashtags:
+                        print(f"해시태그: {hashtags[:3]}")
+                    
+                    preview = ' '.join(text.split()[:6])
+                    print(f"텍스트: {preview}...")
+                    
+                    # TikTok 비디오인지 판단
+                    is_tiktok_video = (
+                        'tiktok.com' in video_link or 
+                        'tiktok.com' in thumbnail or
+                        hashtags or
+                        any(word in text.lower() for word in ['views', 'likes', '@'])
+                    )
+                    
+                    if is_tiktok_video:
+                        print(">>> 실제 TikTok 비디오 콘텐츠로 판단! <<<")
+                    
+                    video_data.append({
+                        "rank": i + 1,
+                        "thumbnail": thumbnail,
+                        "video_link": video_link,
+                        "hashtags": hashtags,
+                        "text_preview": preview,
+                        "is_tiktok_video": is_tiktok_video
+                    })
+            
+            # View More 버튼 확인
+            print("\nView More 버튼 확인...")
+            try:
+                view_more = page.query_selector("text=\"View More\"")
+                view_more_available = view_more and view_more.is_visible()
+                if view_more_available:
+                    print("View More 버튼 발견!")
+                else:
+                    print("View More 버튼 없음")
+            except:
+                view_more_available = False
+                print("View More 버튼 확인 실패")
+            
+            # 결과 저장
+            result = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "videos_tab_clicked": videos_tab_clicked,
+                "video_selectors_found": found_videos,
+                "tiktok_links_count": len(all_links),
+                "tiktok_images_count": len(all_images),
+                "view_more_available": view_more_available,
+                "video_samples": video_data
+            }
+            
+            with open("videos_tab_results.json", 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n결과 저장: videos_tab_results.json")
+            
+            # 실제 TikTok 비디오 개수
+            actual_videos = [v for v in video_data if v['is_tiktok_video']]
+            print(f"실제 TikTok 비디오로 판단: {len(actual_videos)}개")
+            
+            print("\n15초 후 브라우저 종료...")
+            page.wait_for_timeout(15000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+        
+        finally:
+            browser.close()
+    
+    print("Videos 탭 탐색 완료!")
+
+if __name__ == "__main__":
+    click_videos_tab_and_explore()

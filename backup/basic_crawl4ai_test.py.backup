@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""
+Crawl4AI 최소 설정 테스트
+"""
+
+import asyncio
+import json
+import re
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+
+async def minimal_test():
+    """최소 설정 테스트"""
+    print("Crawl4AI 최소 설정 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        # 최소 설정으로 크롤링
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+            # 설정 없이 기본값 사용
+        )
+        
+        if result.success:
+            print("크롤링 성공!")
+            print(f"상태코드: {result.status_code}")
+            print(f"콘텐츠 길이: {len(result.extracted_content)}")
+            print(f"콘텐츠 미리보기:\n{result.extracted_content[:500]}")
+            
+            # 해시태그 찾기
+            hashtags = re.findall(r'#\w+', result.extracted_content)
+            unique_hashtags = list(set(hashtags))
+            print(f"\n발견된 해시태그: {len(unique_hashtags)}개")
+            if unique_hashtags:
+                print(f"해시태그: {unique_hashtags[:10]}")
+            
+            # 비디오 ID 찾기
+            video_ids = re.findall(r'/video/(\d+)', result.extracted_content)
+            unique_video_ids = list(set(video_ids))
+            print(f"\n발견된 비디오 ID: {len(unique_video_ids)}개")
+            if unique_video_ids:
+                print(f"비디오 ID: {unique_video_ids[:5]}")
+            
+            # 결과 저장
+            with open('minimal_crawl4ai_result.json', 'w', encoding='utf-8') as f:
+                json.dump({
+                    'success': True,
+                    'status_code': result.status_code,
+                    'url': result.url,
+                    'content_length': len(result.extracted_content),
+                    'hashtags': unique_hashtags,
+                    'video_ids': unique_video_ids,
+                    'content_preview': result.extracted_content[:1000]
+                }, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n결과 저장: minimal_crawl4ai_result.json")
+            return True
+        else:
+            print(f"크롤링 실패: {result.error_message}")
+            return False
+
+async def test_simple_site():
+    """간단한 사이트로 Crawl4AI 기능 확인"""
+    print("\n구글 홈페이지 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        result = await crawler.arun(url="https://www.google.com")
+        
+        if result.success:
+            print("구글 크롤링 성공!")
+            print(f"상태코드: {result.status_code}")
+            print(f"콘텐츠 길이: {len(result.extracted_content)}")
+            return True
+        else:
+            print(f"구글 크롤링 실패: {result.error_message}")
+            return False
+
+async def main():
+    """메인 테스트"""
+    print("Crawl4AI 기본 테스트 시작")
+    print("=" * 50)
+    
+    # 간단한 사이트 테스트 먼저
+    google_success = await test_simple_site()
+    
+    if google_success:
+        print("\nCrawl4AI 작동 확인됨. TikTok 사이트 테스트...")
+        tiktok_success = await minimal_test()
+    else:
+        print("Crawl4AI 기본 작동에 문제가 있습니다.")
+        tiktok_success = False
+    
+    print(f"\n{'=' * 50}")
+    print("테스트 결과")
+    print(f"{'=' * 50}")
+    print(f"구글 테스트: {'성공' if google_success else '실패'}")
+    print(f"TikTok 테스트: {'성공' if tiktok_success else '실패'}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

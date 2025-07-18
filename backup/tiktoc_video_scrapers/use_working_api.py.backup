@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""
+발견한 실제 작동하는 API 사용하여 해시태그 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+def extract_hashtags_from_desc(desc):
+    """
+    비디오 설명에서 해시태그 추출
+    """
+    if not desc:
+        return []
+    
+    hashtags = re.findall(r'#\w+', desc)
+    return hashtags
+
+def use_working_api():
+    """
+    실제 작동하는 API를 사용해 해시태그 수집
+    """
+    print("실제 작동하는 API로 해시태그 수집...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            # 페이지 로딩으로 인증 정보 획득
+            print("페이지 로딩으로 인증 정보 획득...")
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 실제 API 호출 (이전에 성공한 패턴)
+            api_url = "https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=24&secUid=MS4wLjABAAAAplov3bw6JwAPxa9vOgAQs0IYguj0MnfVkuT1xAeGCs0&lang=en"
+            
+            print(f"API 호출: {api_url}")
+            
+            response = page.request.get(api_url)
+            
+            if response.status == 200:
+                data = response.json()
+                print(f"성공! {len(data.get('items', []))}개 비디오 데이터 수집")
+                
+                # 해시태그 추출 및 분석
+                videos_with_hashtags = []
+                all_hashtags = {}
+                
+                for i, video in enumerate(data.get('items', [])):
+                    video_id = video.get('id', '')
+                    desc = video.get('desc', '')
+                    author = video.get('author', {})
+                    stats = video.get('statsV2', video.get('stats', {}))
+                    
+                    # 해시태그 추출
+                    hashtags = extract_hashtags_from_desc(desc)
+                    
+                    # 해시태그 통계
+                    for hashtag in hashtags:
+                        all_hashtags[hashtag] = all_hashtags.get(hashtag, 0) + 1
+                    
+                    video_data = {
+                        'rank': i + 1,
+                        'video_id': video_id,
+                        'desc': desc,
+                        'hashtags': hashtags,
+                        'author': author.get('uniqueId', ''),
+                        'play_count': stats.get('playCount', '0'),
+                        'scraped_at': time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    videos_with_hashtags.append(video_data)
+                    
+                    print(f"  #{i+1}: {video_id}")
+                    print(f"    작성자: {author.get('uniqueId', 'N/A')}")
+                    print(f"    조회수: {stats.get('playCount', 'N/A')}")
+                    print(f"    해시태그: {hashtags}")
+                    print()
+                
+                # 결과 저장
+                result = {
+                    'scrape_info': {
+                        'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                        'api_url': api_url,
+                        'total_videos': len(videos_with_hashtags),
+                        'method': 'working_embed_api'
+                    },
+                    'videos': videos_with_hashtags,
+                    'hashtag_stats': dict(sorted(all_hashtags.items(), key=lambda x: x[1], reverse=True))
+                }
+                
+                filename = 'working_api_hashtags_result.json'
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+                
+                print(f"{'='*60}")
+                print(f"API를 통한 해시태그 수집 성공!")
+                print(f"{'='*60}")
+                print(f"결과 파일: {filename}")
+                print(f"수집된 비디오: {len(videos_with_hashtags)}개")
+                print(f"총 유니크 해시태그: {len(all_hashtags)}개")
+                
+                # 상위 해시태그 표시
+                if all_hashtags:
+                    print(f"\n상위 해시태그:")
+                    top_hashtags = sorted(all_hashtags.items(), key=lambda x: x[1], reverse=True)[:10]
+                    for hashtag, count in top_hashtags:
+                        print(f"  {hashtag}: {count}회")
+                
+                # 원본 응답도 저장
+                with open('working_api_full_response.json', 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                print(f"\n원본 API 응답 저장: working_api_full_response.json")
+                
+                return True
+                
+            else:
+                print(f"API 호출 실패: Status {response.status}")
+                error_text = response.text()[:500]
+                print(f"오류 내용: {error_text}")
+                return False
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        
+        finally:
+            page.wait_for_timeout(3000)
+            browser.close()
+
+if __name__ == "__main__":
+    success = use_working_api()
+    if success:
+        print(f"\n해시태그 수집 성공!")
+    else:
+        print(f"\n해시태그 수집 실패.")

@@ -66,23 +66,30 @@ run_complete_collection.bat
 - 📌 해시태그 데이터 수집
 - 📊 수집 결과 리포트 생성
 - 🔧 **UTF-8 인코딩 자동 설정**으로 안정적 실행
+- **모든 수집 및 리포트 생성 과정이 이 스크립트 하나로 자동 실행됩니다.**
 
 ## 📊 3단계: 결과 확인
 
 수집 완료 후 다음으로 결과를 확인할 수 있습니다:
 
 ```cmd
-# 가상환경 활성화
-venv\Scripts\activate
+# 가상환경 활성화 (사용하는 쉘에 따라 선택)
 
-# 수집 상태 확인
+# PowerShell 또는 Command Prompt (CMD) 사용자:
+call venv\Scripts\activate.bat
+
+# Git Bash 또는 WSL (Windows Subsystem for Linux) 사용자:
+source venv/Scripts/activate
+
+# 가상환경 활성화 후 스크립트 실행 (예시)
 python scripts/check_collection_status.py
 
-# 또는 가상환경 직접 사용
-venv\Scripts\python.exe scripts/check_collection_status.py
+# 또는 가상환경을 활성화하지 않고 직접 Python 실행 파일 사용 (권장)
+# 경로에 공백이 포함된 경우 전체 경로를 큰따옴표로 묶으세요.
+"venv/Scripts/python.exe" scripts/check_collection_status.py
 
 # 데이터베이스 직접 보기
-venv\Scripts\python.exe src/database/view_database.py
+"venv/Scripts/python.exe" src/database/view_database.py
 ```
 
 ## ⏰ 4단계: 자동 스케줄링 (선택사항)

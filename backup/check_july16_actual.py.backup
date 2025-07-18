@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+7월 16일 실제 수집 시간 확인 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+from datetime import datetime
+
+def check_july16_actual():
+    """7월 16일 실제 수집 시간 확인"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 70)
+        print("🕐 7월 16일 실제 수집 시간 확인")
+        print("=" * 70)
+        
+        # 정확한 시간 범위로 검색 (7월 16일 01:30 ~ 02:00)
+        cursor.execute("""
+            SELECT title, artist, tiktok_ugc_count, youtube_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE ugc_last_updated >= '2025-07-16 01:30:00' 
+              AND ugc_last_updated <= '2025-07-16 02:00:00'
+            ORDER BY ugc_last_updated DESC
+        """)
+        july16_updates = cursor.fetchall()
+        
+        print(f"📅 7월 16일 01:30-02:00 시간대 업데이트: {len(july16_updates)}곡")
+        
+        if july16_updates:
+            print("   📊 수집된 곡 목록:")
+            for i, song in enumerate(july16_updates, 1):
+                tiktok_count = f"{song[2]:,}" if song[2] else "미수집"
+                youtube_count = f"{song[3]:,}" if song[3] else "미수집"
+                print(f"   {i:2d}. {song[0]} - {song[1]}")
+                print(f"       TikTok: {tiktok_count}, YouTube: {youtube_count}")
+                print(f"       업데이트: {song[4]}")
+                print()
+        else:
+            print("   ❌ 해당 시간대 업데이트가 없습니다.")
+        
+        # 더 넓은 범위 검색 (7월 16일 전체)
+        cursor.execute("""
+            SELECT title, artist, tiktok_ugc_count, youtube_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE ugc_last_updated >= '2025-07-16 00:00:00' 
+              AND ugc_last_updated < '2025-07-17 00:00:00'
+            ORDER BY ugc_last_updated DESC
+        """)
+        july16_all = cursor.fetchall()
+        
+        print(f"📅 7월 16일 전체 업데이트: {len(july16_all)}곡")
+        
+        if july16_all:
+            print("   📊 시간대별 분포:")
+            time_groups = {}
+            for song in july16_all:
+                hour = song[4].split(' ')[1][:2]  # 시간 부분 추출
+                if hour not in time_groups:
+                    time_groups[hour] = []
+                time_groups[hour].append(song)
+            
+            for hour in sorted(time_groups.keys()):
+                print(f"   {hour}시: {len(time_groups[hour])}곡")
+                for song in time_groups[hour][:3]:  # 각 시간대별 상위 3곡
+                    print(f"      - {song[0]} - {song[1]} ({song[4]})")
+        
+        # 해시태그 수집 확인
+        cursor.execute("""
+            SELECT COUNT(DISTINCT s.song_id) as songs_with_hashtags,
+                   COUNT(*) as total_hashtags
+            FROM song_hashtags s
+            JOIN songs song ON s.song_id = song.id
+            WHERE song.ugc_last_updated >= '2025-07-16 00:00:00' 
+              AND song.ugc_last_updated < '2025-07-17 00:00:00'
+        """)
+        hashtag_stats = cursor.fetchone()
+        
+        print(f"\n📌 7월 16일 해시태그 수집:")
+        print(f"   🎵 해시태그 수집 곡: {hashtag_stats[0]}곡")
+        print(f"   📊 총 해시태그 수: {hashtag_stats[1]}개")
+        
+        print("=" * 70)
+
+if __name__ == "__main__":
+    check_july16_actual()

@@ -1,0 +1,53 @@
+{
+  "timestamp": "20250715_141702",
+  "total_videos": 5,
+  "source_url": "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+  "scraper_version": "enhanced_v1.0",
+  "videos": [
+    {
+      "index": 1,
+      "video_id": null,
+      "video_url": null,
+      "thumbnail": null,
+      "hashtags": [],
+      "description": "",
+      "raw_text": ""
+    },
+    {
+      "index": 2,
+      "video_id": null,
+      "video_url": null,
+      "thumbnail": null,
+      "hashtags": [],
+      "description": "",
+      "raw_text": ""
+    },
+    {
+      "index": 3,
+      "video_id": null,
+      "video_url": null,
+      "thumbnail": null,
+      "hashtags": [],
+      "description": "",
+      "raw_text": ""
+    },
+    {
+      "index": 4,
+      "video_id": null,
+      "video_url": null,
+      "thumbnail": null,
+      "hashtags": [],
+      "description": "",
+      "raw_text": ""
+    },
+    {
+      "index": 5,
+      "video_id": null,
+      "video_url": null,
+      "thumbnail": null,
+      "hashtags": [],
+      "description": "",
+      "raw_text": ""
+    }
+  ]
+}

@@ -27,6 +27,8 @@ set PYTHON_EXE="%CD%\venv\Scripts\python.exe"
 REM Python 인코딩 환경변수 설정 (UTF-8 강제)
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
+set PYTHONPATH=%CD%
+set PATH=%CD%\venv\Scripts;%PATH%
 
 REM Python 실행 파일 존재 확인
 if not exist %PYTHON_EXE% (

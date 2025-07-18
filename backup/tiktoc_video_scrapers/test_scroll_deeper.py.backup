@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 더 깊게 스크롤해서 실제 비디오 찾기
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def scroll_and_find_videos():
+    """
+    페이지를 더 깊게 스크롤해서 실제 비디오들 찾기
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok 페이지 깊은 스크롤 탐색...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            print("페이지 로딩 완료. 스크롤 시작...")
+            
+            # 여러 번 스크롤해서 모든 콘텐츠 로드
+            for i in range(5):
+                print(f"스크롤 {i+1}/5...")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(3000)  # 각 스크롤 후 로딩 대기
+            
+            print("최종 스크롤 완료")
+            
+            # HTML 분석
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # 다양한 비디오 관련 셀렉터들 시도
+            video_selectors = [
+                "video",  # 실제 video 태그
+                "[class*='video']",  # 클래스에 video 포함
+                "[class*='Video']",  # 클래스에 Video 포함
+                "div[class*='item']",  # 아이템 div
+                "div[class*='content']",  # 콘텐츠 div
+                "[data-testid*='video']",  # 데이터 속성
+                "iframe",  # iframe으로 embedded된 비디오
+            ]
+            
+            found_items = {}
+            
+            for selector in video_selectors:
+                items = soup.select(selector)
+                if items:
+                    found_items[selector] = len(items)
+                    print(f"{selector}: {len(items)}개 발견")
+            
+            # 가장 많은 아이템을 가진 셀렉터 선택
+            if found_items:
+                best_selector = max(found_items, key=found_items.get)
+                best_items = soup.select(best_selector)
+                print(f"\n최적 셀렉터: {best_selector} ({len(best_items)}개)")
+                
+                # 상위 10개 아이템 분석
+                videos_found = []
+                for i, item in enumerate(best_items[:10]):
+                    print(f"\n=== 아이템 {i+1} 분석 ===")
+                    
+                    # 이미지들
+                    images = item.select("img")
+                    thumbnail = ""
+                    if images:
+                        thumbnail = images[0].get('src', '')
+                        if thumbnail.startswith('//'):
+                            thumbnail = 'https:' + thumbnail
+                        print(f"썸네일: {thumbnail[:60]}...")
+                    
+                    # 링크들
+                    links = item.select("a")
+                    video_link = ""
+                    if links:
+                        video_link = links[0].get('href', '')
+                        if video_link.startswith('/'):
+                            video_link = 'https://ads.tiktok.com' + video_link
+                        print(f"링크: {video_link[:60]}...")
+                    
+                    # 텍스트 분석
+                    text = item.get_text().strip()
+                    
+                    # 해시태그 찾기
+                    hashtags = [word.strip('.,!?') for word in text.split() if word.startswith('#')]
+                    if hashtags:
+                        print(f"해시태그: {hashtags[:5]}")
+                    
+                    # TikTok 관련 키워드 확인
+                    tiktok_keywords = ['tiktok', 'video', 'watch', 'trend', 'viral']
+                    relevant_keywords = [kw for kw in tiktok_keywords if kw in text.lower()]
+                    if relevant_keywords:
+                        print(f"TikTok 키워드: {relevant_keywords}")
+                    
+                    # 텍스트 미리보기
+                    preview = ' '.join(text.split()[:8])
+                    print(f"텍스트: {preview}...")
+                    
+                    # 실제 TikTok 비디오인지 판단
+                    is_video = False
+                    if ('tiktok.com' in video_link or 
+                        'tiktok.com' in thumbnail or 
+                        any(kw in text.lower() for kw in ['watch', 'video']) or
+                        hashtags):
+                        is_video = True
+                        print(">>> 실제 TikTok 비디오로 판단 <<<")
+                    
+                    videos_found.append({
+                        "rank": i + 1,
+                        "thumbnail": thumbnail,
+                        "video_link": video_link,
+                        "hashtags": hashtags,
+                        "text_preview": preview,
+                        "is_likely_video": is_video,
+                        "has_tiktok_url": 'tiktok.com' in (video_link + thumbnail)
+                    })
+                
+                # View More 버튼 확인
+                print(f"\nView More 버튼 확인...")
+                view_more_found = False
+                try:
+                    view_more = page.query_selector("text=\"View More\"")
+                    if view_more and view_more.is_visible():
+                        print("View More 버튼 발견!")
+                        view_more_found = True
+                except:
+                    pass
+                
+                # 결과 저장
+                result = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "best_selector": best_selector,
+                    "total_items": len(best_items),
+                    "view_more_available": view_more_found,
+                    "videos_analysis": videos_found
+                }
+                
+                with open("deep_scroll_results.json", 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+                
+                print(f"\n결과 저장: deep_scroll_results.json")
+                
+                # 실제 비디오로 판단되는 것들 카운트
+                actual_videos = [v for v in videos_found if v['is_likely_video']]
+                print(f"실제 비디오로 판단: {len(actual_videos)}개")
+                
+            else:
+                print("적절한 아이템을 찾지 못했습니다.")
+            
+            print("\n10초 후 브라우저 종료...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+        
+        finally:
+            browser.close()
+    
+    print("깊은 스크롤 탐색 완료!")
+
+if __name__ == "__main__":
+    scroll_and_find_videos()

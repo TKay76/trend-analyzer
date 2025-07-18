@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""
+발견한 API 엔드포인트로 직접 데이터 수집
+"""
+
+import requests
+import json
+import time
+from fake_useragent import UserAgent
+
+def test_creative_radar_api():
+    """Creative Radar API 직접 호출 테스트"""
+    print("Creative Radar API 직접 호출 테스트...")
+    
+    # 가짜 User-Agent
+    ua = UserAgent()
+    
+    headers = {
+        'User-Agent': ua.random,
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9,ko;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en',
+        'Origin': 'https://ads.tiktok.com',
+        'Connection': 'keep-alive',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+    }
+    
+    # 다양한 API 패턴 테스트
+    api_urls = [
+        # 기본 인기 트렌드
+        "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=30&order_by=vv&country_code=KR",
+        
+        # 다른 정렬 방식들
+        "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=30&order_by=likes&country_code=KR",
+        "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=30&order_by=comments&country_code=KR", 
+        "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=30&order_by=shares&country_code=KR",
+        
+        # 더 많은 데이터
+        "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=50&order_by=vv&country_code=KR",
+    ]
+    
+    results = []
+    
+    for i, api_url in enumerate(api_urls):
+        print(f"\n=== API 테스트 {i+1}: {api_url.split('order_by=')[-1].split('&')[0]} ===")
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=15)
+            print(f"상태코드: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"응답 키들: {list(data.keys())}")
+                
+                # 데이터 분석
+                if 'data' in data:
+                    items = data['data'].get('list', [])
+                    print(f"아이템 수: {len(items)}")
+                    
+                    if items:
+                        # 첫 번째 아이템 분석
+                        first_item = items[0]
+                        print(f"첫 번째 아이템 키들: {list(first_item.keys())}")
+                        
+                        # 비디오 ID 확인
+                        video_id = first_item.get('id') or first_item.get('video_id') or first_item.get('aweme_id')
+                        print(f"비디오 ID: {video_id}")
+                        
+                        # 해시태그 확인
+                        hashtags = []
+                        if 'desc' in first_item:
+                            import re
+                            hashtags = re.findall(r'#\w+', first_item['desc'])
+                        elif 'hashtags' in first_item:
+                            hashtags = first_item['hashtags']
+                        elif 'tags' in first_item:
+                            hashtags = first_item['tags']
+                        
+                        print(f"해시태그: {hashtags}")
+                        
+                        # 통계 정보
+                        stats = first_item.get('stats', {})
+                        if stats:
+                            print(f"통계: {stats}")
+                        
+                        # 결과 저장
+                        api_result = {
+                            'api_url': api_url,
+                            'total_items': len(items),
+                            'sample_item': first_item,
+                            'success': True
+                        }
+                        results.append(api_result)
+                        
+                        # 전체 데이터 저장
+                        filename = f"api_result_{i+1}_{api_url.split('order_by=')[-1].split('&')[0]}.json"
+                        with open(filename, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        print(f"결과 저장: {filename}")
+                        
+                    else:
+                        print("아이템이 없음")
+                else:
+                    print("data 필드가 없음")
+                    print(f"응답 내용: {str(data)[:200]}...")
+            
+            elif response.status_code == 403:
+                print("접근 거부 - 인증 필요할 수 있음")
+            elif response.status_code == 429:
+                print("요청 제한 - 잠시 대기")
+                time.sleep(5)
+            else:
+                print(f"HTTP 오류: {response.status_code}")
+                print(f"응답: {response.text[:200]}...")
+        
+        except Exception as e:
+            print(f"오류: {e}")
+            
+        time.sleep(2)  # 요청 간격
+    
+    # 결과 요약
+    print(f"\n{'='*60}")
+    print("API 테스트 결과 요약")
+    print(f"{'='*60}")
+    
+    successful_apis = [r for r in results if r['success']]
+    print(f"성공한 API: {len(successful_apis)}/{len(api_urls)}개")
+    
+    if successful_apis:
+        total_videos = sum(r['total_items'] for r in successful_apis)
+        print(f"총 수집 가능한 비디오: {total_videos}개")
+        
+        # 해시태그 분석
+        all_hashtags = []
+        for result in successful_apis:
+            sample = result['sample_item']
+            if 'desc' in sample:
+                import re
+                hashtags = re.findall(r'#\w+', sample['desc'])
+                all_hashtags.extend(hashtags)
+        
+        if all_hashtags:
+            unique_hashtags = list(set(all_hashtags))
+            print(f"발견된 해시태그: {len(unique_hashtags)}개")
+            print(f"해시태그 예시: {unique_hashtags[:10]}")
+    
+    return results
+
+def collect_all_categories():
+    """모든 카테고리에서 데이터 수집"""
+    print("\n모든 카테고리 데이터 수집...")
+    
+    categories = [
+        ('hot', 'vv'),
+        ('likes', 'likes'), 
+        ('comments', 'comments'),
+        ('shares', 'shares')
+    ]
+    
+    ua = UserAgent()
+    headers = {
+        'User-Agent': ua.random,
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9,ko;q=0.8',
+        'Referer': 'https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en',
+        'Origin': 'https://ads.tiktok.com',
+    }
+    
+    all_results = {}
+    
+    for category_name, order_by in categories:
+        print(f"\n{category_name.upper()} 카테고리 수집 중...")
+        
+        api_url = f"https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=30&order_by={order_by}&country_code=KR"
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'data' in data and 'list' in data['data']:
+                    videos = data['data']['list']
+                    print(f"수집된 비디오: {len(videos)}개")
+                    
+                    # 해시태그 추출
+                    videos_with_hashtags = []
+                    for video in videos:
+                        import re
+                        desc = video.get('desc', '')
+                        hashtags = re.findall(r'#\w+', desc)
+                        
+                        video_with_hashtags = {
+                            'video_id': video.get('id'),
+                            'description': desc,
+                            'hashtags': hashtags,
+                            'stats': video.get('stats', {}),
+                            'category': category_name
+                        }
+                        videos_with_hashtags.append(video_with_hashtags)
+                    
+                    all_results[category_name] = videos_with_hashtags
+                    print(f"해시태그가 있는 비디오: {sum(1 for v in videos_with_hashtags if v['hashtags'])}개")
+                else:
+                    print("데이터 형식 오류")
+            else:
+                print(f"API 호출 실패: {response.status_code}")
+        
+        except Exception as e:
+            print(f"오류: {e}")
+        
+        time.sleep(2)
+    
+    # 전체 결과 저장
+    if all_results:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"tiktok_api_collection_{timestamp}.json"
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump({
+                'timestamp': timestamp,
+                'source': 'creative_radar_api',
+                'categories': all_results,
+                'total_videos': sum(len(videos) for videos in all_results.values())
+            }, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n전체 결과 저장: {filename}")
+        
+        # 통계 출력
+        total_videos = sum(len(videos) for videos in all_results.values())
+        total_hashtags = []
+        
+        for category_videos in all_results.values():
+            for video in category_videos:
+                total_hashtags.extend(video['hashtags'])
+        
+        unique_hashtags = list(set(total_hashtags))
+        
+        print(f"\n{'='*60}")
+        print("전체 수집 결과")
+        print(f"{'='*60}")
+        print(f"총 비디오: {total_videos}개")
+        print(f"카테고리별:")
+        for category, videos in all_results.items():
+            videos_with_hashtags = sum(1 for v in videos if v['hashtags'])
+            print(f"  {category}: {len(videos)}개 (해시태그 있음: {videos_with_hashtags}개)")
+        
+        print(f"고유 해시태그: {len(unique_hashtags)}개")
+        if unique_hashtags:
+            print(f"해시태그 예시: {unique_hashtags[:15]}")
+    
+    return all_results
+
+if __name__ == "__main__":
+    # API 테스트
+    test_results = test_creative_radar_api()
+    
+    # 성공적이면 전체 데이터 수집
+    if any(r.get('success') for r in test_results):
+        print("\nAPI 테스트 성공! 전체 데이터 수집 진행...")
+        collection_results = collect_all_categories()
+    else:
+        print("\nAPI 테스트 실패. 다른 방법을 시도해야 합니다.")

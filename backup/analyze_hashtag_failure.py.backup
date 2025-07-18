@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""
+음악 해시태그 수집 실패 원인 분석
+"""
+
+import sqlite3
+import json
+import glob
+import os
+
+def analyze_hashtag_failure():
+    """해시태그 수집 실패 원인 분석"""
+    print("음악 해시태그 수집 실패 원인 분석...")
+    
+    # 1. 데이터베이스 상태 확인
+    print("\n=== 데이터베이스 상태 확인 ===")
+    conn = sqlite3.connect('data/music_trends.db')
+    cursor = conn.cursor()
+    
+    # 테이블 존재 확인
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = cursor.fetchall()
+    print(f"존재하는 테이블들: {[t[0] for t in tables]}")
+    
+    # 각 테이블 레코드 수 확인
+    for table in ['songs', 'hashtags', 'song_hashtags']:
+        try:
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+            count = cursor.fetchone()[0]
+            print(f"{table} 테이블: {count}개 레코드")
+        except:
+            print(f"{table} 테이블: 존재하지 않음")
+    
+    # song_hashtags 테이블 구조 확인
+    cursor.execute("PRAGMA table_info(song_hashtags)")
+    schema = cursor.fetchall()
+    print(f"\nsong_hashtags 테이블 구조:")
+    for row in schema:
+        print(f"  {row}")
+    
+    # song_hashtags 샘플 데이터 확인
+    cursor.execute("SELECT * FROM song_hashtags LIMIT 10")
+    sample_data = cursor.fetchall()
+    print(f"\nsong_hashtags 샘플 데이터:")
+    for row in sample_data:
+        print(f"  {row}")
+    
+    # hashtags 테이블이 비어있는 이유 확인
+    cursor.execute("SELECT COUNT(*) FROM hashtags")
+    hashtag_count = cursor.fetchone()[0]
+    print(f"\nhashtags 테이블: {hashtag_count}개 (비어있음)")
+    
+    conn.close()
+    
+    # 2. 해시태그 수집 스크립트 확인
+    print("\n=== 해시태그 수집 스크립트 확인 ===")
+    
+    # 해시태그 관련 파일들 찾기
+    hashtag_files = []
+    for pattern in ['*hashtag*', '*ugc*', '*collect*']:
+        hashtag_files.extend(glob.glob(pattern + '.py'))
+        hashtag_files.extend(glob.glob(f'scripts/{pattern}.py'))
+    
+    print(f"해시태그 관련 파일들: {hashtag_files}")
+    
+    # 3. 최근 로그 확인
+    print("\n=== 최근 로그 확인 ===")
+    
+    log_files = glob.glob('logs/*.log')
+    if log_files:
+        latest_log = max(log_files, key=os.path.getmtime)
+        print(f"최신 로그 파일: {latest_log}")
+        
+        # 로그에서 해시태그 관련 오류 찾기
+        with open(latest_log, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            
+        hashtag_errors = []
+        ugc_errors = []
+        
+        for i, line in enumerate(lines):
+            if 'hashtag' in line.lower() or 'ugc' in line.lower():
+                if 'error' in line.lower() or 'fail' in line.lower():
+                    hashtag_errors.append((i+1, line.strip()))
+                elif 'success' in line.lower():
+                    ugc_errors.append((i+1, line.strip()))
+        
+        print(f"해시태그 관련 오류 ({len(hashtag_errors)}개):")
+        for line_num, error in hashtag_errors[:5]:
+            print(f"  {line_num}: {error}")
+        
+        print(f"해시태그 관련 성공 ({len(ugc_errors)}개):")
+        for line_num, success in ugc_errors[:5]:
+            print(f"  {line_num}: {success}")
+    
+    # 4. UGC 수집 스크립트 상태 확인
+    print("\n=== UGC 수집 스크립트 상태 확인 ===")
+    
+    ugc_scripts = [
+        'scripts/collect_tiktok_batch_safe.py',
+        'scripts/collect_youtube_batch_safe.py',
+        'src/scrapers/tiktok_ugc_counter.py',
+        'src/scrapers/youtube_ugc_counter.py'
+    ]
+    
+    for script in ugc_scripts:
+        if os.path.exists(script):
+            print(f"✅ {script} 존재")
+        else:
+            print(f"❌ {script} 없음")
+    
+    # 5. 데이터베이스 스키마 문제 확인
+    print("\n=== 데이터베이스 스키마 분석 ===")
+    
+    conn = sqlite3.connect('data/music_trends.db')
+    cursor = conn.cursor()
+    
+    # songs 테이블에서 tiktok_id 확인
+    cursor.execute("SELECT title, artist, tiktok_id FROM songs WHERE tiktok_id IS NOT NULL LIMIT 5")
+    songs_with_tiktok_id = cursor.fetchall()
+    print(f"TikTok ID가 있는 곡들:")
+    for song in songs_with_tiktok_id:
+        print(f"  {song[0]} - {song[1]}: {song[2]}")
+    
+    # 테이블 간 관계 확인
+    cursor.execute("""
+        SELECT s.title, s.artist, COUNT(sh.hashtag_id) as hashtag_count
+        FROM songs s
+        LEFT JOIN song_hashtags sh ON s.id = sh.song_id
+        GROUP BY s.id
+        HAVING hashtag_count > 0
+        LIMIT 5
+    """)
+    songs_with_hashtags = cursor.fetchall()
+    print(f"\n해시태그가 연결된 곡들:")
+    for song in songs_with_hashtags:
+        print(f"  {song[0]} - {song[1]}: {song[2]}개 해시태그")
+    
+    conn.close()
+    
+    # 6. 결론 및 권장 사항
+    print(f"\n{'='*60}")
+    print("해시태그 수집 실패 원인 분석 결과")
+    print(f"{'='*60}")
+    
+    print("🔍 발견된 문제들:")
+    print("1. hashtags 테이블이 비어있음 (0개)")
+    print("2. song_hashtags 테이블에는 360개 레코드가 있음")
+    print("3. 이는 해시태그 수집은 시도되었지만 hashtags 테이블에 저장되지 않음을 의미")
+    
+    print("\n💡 추정 원인:")
+    print("1. UGC 수집 스크립트의 실행 실패")
+    print("2. 해시태그 데이터를 song_hashtags에만 저장하고 hashtags 테이블에 저장하지 않음")
+    print("3. 데이터베이스 스키마 또는 외래 키 제약 조건 문제")
+    print("4. 해시태그 수집 API 또는 스크래핑 로직의 오류")
+    
+    print("\n🛠️ 권장 해결책:")
+    print("1. UGC 수집 스크립트를 수동으로 실행하여 오류 확인")
+    print("2. 데이터베이스 스키마 및 외래 키 제약 조건 검토")
+    print("3. 해시태그 수집 로직의 디버깅 및 수정")
+    print("4. 로그 파일에서 구체적인 오류 메시지 확인")
+
+if __name__ == "__main__":
+    analyze_hashtag_failure()

@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+Crawl4AI 간단한 테스트
+"""
+
+import asyncio
+import json
+import re
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+
+async def simple_test():
+    """간단한 크롤링 테스트"""
+    print("Crawl4AI 간단한 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        # 기본 설정으로 크롤링
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            config=CrawlerRunConfig(
+                page_timeout=15000,  # 15초로 줄임
+                wait_for="domcontentloaded",  # networkidle 대신
+                only_text=True
+            )
+        )
+        
+        if result.success:
+            print("크롤링 성공!")
+            print(f"콘텐츠 길이: {len(result.extracted_content)}")
+            print(f"콘텐츠 미리보기:\n{result.extracted_content[:500]}")
+            
+            # 해시태그 찾기
+            hashtags = re.findall(r'#\w+', result.extracted_content)
+            unique_hashtags = list(set(hashtags))
+            print(f"\n발견된 해시태그: {len(unique_hashtags)}개")
+            print(f"해시태그: {unique_hashtags[:10]}")
+            
+            # 결과 저장
+            with open('simple_crawl4ai_result.json', 'w', encoding='utf-8') as f:
+                json.dump({
+                    'success': True,
+                    'url': result.url,
+                    'content_length': len(result.extracted_content),
+                    'hashtags': unique_hashtags,
+                    'content_preview': result.extracted_content[:1000]
+                }, f, ensure_ascii=False, indent=2)
+            
+            return True
+        else:
+            print(f"크롤링 실패: {result.error_message}")
+            return False
+
+async def test_with_css_selector():
+    """CSS 셀렉터로 비디오 카드만 추출"""
+    print("\nCSS 셀렉터 테스트...")
+    
+    async with AsyncWebCrawler(verbose=True) as crawler:
+        result = await crawler.arun(
+            url="https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+            config=CrawlerRunConfig(
+                page_timeout=10000,
+                wait_for="domcontentloaded",
+                css_selector=".CommonGridLayoutDataList_cardWrapper__jkA9g"
+            )
+        )
+        
+        if result.success:
+            print("CSS 셀렉터 크롤링 성공!")
+            print(f"추출된 카드 수: {len(result.extracted_content)}")
+            print(f"내용 미리보기:\n{result.extracted_content[:300]}")
+            
+            # 비디오 ID 찾기
+            video_ids = re.findall(r'/video/(\d+)', result.extracted_content)
+            unique_video_ids = list(set(video_ids))
+            print(f"\n발견된 비디오 ID: {len(unique_video_ids)}개")
+            print(f"비디오 ID: {unique_video_ids[:5]}")
+            
+            return True
+        else:
+            print(f"CSS 셀렉터 크롤링 실패: {result.error_message}")
+            return False
+
+async def main():
+    """메인 테스트"""
+    print("Crawl4AI 간단 테스트 시작")
+    print("=" * 50)
+    
+    # 기본 테스트
+    success1 = await simple_test()
+    
+    # CSS 셀렉터 테스트  
+    success2 = await test_with_css_selector()
+    
+    print(f"\n{'=' * 50}")
+    print("테스트 결과")
+    print(f"{'=' * 50}")
+    print(f"기본 테스트: {'성공' if success1 else '실패'}")
+    print(f"CSS 셀렉터 테스트: {'성공' if success2 else '실패'}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

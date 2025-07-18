@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 페이지에서 직접 해시태그 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import re
+
+def extract_hashtags_from_text(text):
+    """
+    텍스트에서 해시태그 추출
+    """
+    if not text:
+        return []
+    
+    hashtags = re.findall(r'#\w+', text)
+    return hashtags
+
+def collect_hashtags_from_creative_center():
+    """
+    Creative Center 페이지에서 해시태그 수집
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok Creative Center에서 해시태그 정보 수집...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 충분한 비디오 로드를 위해 여러 번 View More 클릭
+            for i in range(10):
+                try:
+                    # 스크롤
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(2000)
+                    
+                    # View More 클릭
+                    view_more = page.query_selector('text="View More"')
+                    if view_more and view_more.is_visible():
+                        view_more.click()
+                        print(f"View More 클릭 {i+1}회")
+                        page.wait_for_timeout(3000)
+                    else:
+                        print(f"View More 버튼 없음 ({i+1}회)")
+                        break
+                except Exception as e:
+                    print(f"View More 클릭 실패: {e}")
+                    break
+            
+            # 페이지 분석
+            print("\n페이지 HTML 분석...")
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # 비디오 카드 찾기
+            video_cards = soup.select("div.CommonGridLayoutDataList_cardWrapper__jkA9g")
+            if not video_cards:
+                video_cards = soup.select("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+            
+            print(f"발견된 비디오 카드: {len(video_cards)}개")
+            
+            video_data = []
+            
+            for i, card in enumerate(video_cards):
+                try:
+                    # embed 요소 찾기
+                    if card.name == 'blockquote':
+                        embed_quote = card
+                    else:
+                        embed_quote = card.select_one("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                    
+                    if not embed_quote:
+                        continue
+                    
+                    # 비디오 ID 추출
+                    video_id = embed_quote.get('data-video-id', '')
+                    if not video_id:
+                        continue
+                    
+                    # 기본 정보 수집
+                    tiktok_url = embed_quote.get('cite', '')
+                    
+                    # 해시태그 찾기 - 주변 텍스트에서 검색
+                    hashtags = []
+                    
+                    # 1. embed 요소 자체에서 해시태그 찾기
+                    embed_text = embed_quote.get_text()
+                    hashtags.extend(extract_hashtags_from_text(embed_text))
+                    
+                    # 2. 상위 컨테이너에서 해시태그 찾기
+                    parent = card.parent
+                    if parent:
+                        parent_text = parent.get_text()
+                        hashtags.extend(extract_hashtags_from_text(parent_text))
+                    
+                    # 3. 카드 전체에서 해시태그 찾기
+                    card_text = card.get_text()
+                    hashtags.extend(extract_hashtags_from_text(card_text))
+                    
+                    # 중복 제거
+                    hashtags = list(set(hashtags))
+                    
+                    video_info = {
+                        'rank': i + 1,
+                        'video_id': video_id,
+                        'tiktok_url': tiktok_url,
+                        'hashtags': hashtags,
+                        'scraped_at': time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    video_data.append(video_info)
+                    
+                    print(f"  #{i+1}: {video_id} - {len(hashtags)}개 해시태그: {hashtags[:3]}...")
+                    
+                except Exception as e:
+                    print(f"  #{i+1}: 오류 - {e}")
+                    continue
+            
+            # 결과 저장
+            result = {
+                'scrape_info': {
+                    'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'target_url': target_url,
+                    'total_videos': len(video_data),
+                    'method': 'creative_center_page_scraping'
+                },
+                'videos': video_data
+            }
+            
+            filename = 'tiktok_hashtags_from_page.json'
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n{'='*50}")
+            print(f"페이지 해시태그 수집 완료!")
+            print(f"{'='*50}")
+            print(f"결과 파일: {filename}")
+            print(f"수집된 비디오: {len(video_data)}개")
+            
+            # 해시태그 통계
+            all_hashtags = {}
+            for video in video_data:
+                for hashtag in video['hashtags']:
+                    all_hashtags[hashtag] = all_hashtags.get(hashtag, 0) + 1
+            
+            if all_hashtags:
+                print(f"\n해시태그 통계:")
+                print(f"총 유니크 해시태그: {len(all_hashtags)}개")
+                top_hashtags = sorted(all_hashtags.items(), key=lambda x: x[1], reverse=True)[:10]
+                for hashtag, count in top_hashtags:
+                    print(f"  {hashtag}: {count}회")
+            
+            page.wait_for_timeout(5000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    collect_hashtags_from_creative_center()

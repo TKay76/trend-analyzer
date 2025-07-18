@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""
+secUid 추출 방법으로 실제 해시태그 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+import json
+import re
+
+def extract_hashtags_from_desc(desc):
+    if not desc:
+        return []
+    return re.findall(r'#\w+', desc)
+
+def get_secuid_for_video(browser, video_id):
+    """
+    비디오 ID의 secUid 추출
+    """
+    embed_page = browser.new_page()
+    
+    try:
+        captured_secuid = None
+        
+        def handle_request(request):
+            nonlocal captured_secuid
+            if ('api/recommend/embed_videos' in request.url and 'secUid=' in request.url):
+                # secUid 추출
+                parts = request.url.split('secUid=')
+                if len(parts) > 1:
+                    secuid_part = parts[1].split('&')[0]
+                    captured_secuid = secuid_part
+        
+        embed_page.on('request', handle_request)
+        
+        # embed 페이지 방문
+        embed_url = f"https://www.tiktok.com/embed/v2/{video_id}"
+        embed_page.goto(embed_url, timeout=15000)
+        embed_page.wait_for_timeout(2000)
+        
+        embed_page.close()
+        return captured_secuid
+        
+    except Exception as e:
+        try:
+            embed_page.close()
+        except:
+            pass
+        return None
+
+def get_hashtags_with_secuid(page, secuid):
+    """
+    secUid로 해시태그 정보 가져오기
+    """
+    try:
+        api_url = f"https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=24&secUid={secuid}&lang=en"
+        
+        response = page.request.get(api_url)
+        
+        if response.status == 200:
+            data = response.json()
+            
+            if data.get('items') and len(data['items']) > 0:
+                video = data['items'][0]
+                
+                desc = video.get('desc', '')
+                author = video.get('author', {})
+                stats = video.get('statsV2', video.get('stats', {}))
+                
+                hashtags = extract_hashtags_from_desc(desc)
+                
+                return {
+                    'success': True,
+                    'video_id': video.get('id', ''),
+                    'desc': desc,
+                    'hashtags': hashtags,
+                    'author': author.get('uniqueId', ''),
+                    'play_count': stats.get('playCount', '0')
+                }
+        
+        return {'success': False, 'error': f'API returned {response.status}'}
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+def collect_real_hashtags():
+    """
+    실제 해시태그 수집
+    """
+    print("실제 해시태그 수집 시작...")
+    
+    # 테스트할 비디오들
+    test_videos = [
+        {"id": "7523040630352743688", "category": "Hot", "rank": 1},
+        {"id": "7524665431701933329", "category": "Likes", "rank": 1},
+        {"id": "7524981232858369298", "category": "Comments", "rank": 1},
+        {"id": "7523520411259161874", "category": "Shares", "rank": 1},
+        {"id": "7524985988716694805", "category": "Hot", "rank": 2},
+        {"id": "7523638391435447559", "category": "Likes", "rank": 3},
+        {"id": "7522505521232973074", "category": "Comments", "rank": 3},
+        {"id": "7523841613341265157", "category": "Shares", "rank": 3},
+    ]
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            # Creative Center 페이지 먼저 로딩
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            results = []
+            
+            for video in test_videos:
+                video_id = video['id']
+                category = video['category']
+                rank = video['rank']
+                
+                print(f"\n=== {category} #{rank}: {video_id} ===")
+                
+                # 1단계: secUid 추출
+                print("  secUid 추출 중...")
+                secuid = get_secuid_for_video(browser, video_id)
+                
+                if secuid:
+                    print(f"  secUid 추출 성공: {secuid[:30]}...")
+                    
+                    # 2단계: secUid로 해시태그 수집
+                    print("  해시태그 수집 중...")
+                    result = get_hashtags_with_secuid(page, secuid)
+                    
+                    if result['success']:
+                        print(f"  성공!")
+                        print(f"    반환된 ID: {result['video_id']}")
+                        print(f"    작성자: {result['author']}")
+                        print(f"    조회수: {result['play_count']}")
+                        print(f"    해시태그: {result['hashtags']}")
+                        
+                        # ID 매칭 확인
+                        if str(result['video_id']) == str(video_id):
+                            print(f"    ID 매칭 성공!")
+                        else:
+                            print(f"    ID 불일치: 요청 {video_id}, 응답 {result['video_id']}")
+                    else:
+                        print(f"  해시태그 수집 실패: {result['error']}")
+                        result = {'success': False, 'error': result['error']}
+                else:
+                    print("  secUid 추출 실패")
+                    result = {'success': False, 'error': 'secUid extraction failed'}
+                
+                result['video_id'] = video_id
+                result['category'] = category
+                result['rank'] = rank
+                result['secuid'] = secuid
+                results.append(result)
+                
+                time.sleep(2)
+            
+            # 결과 저장
+            with open('real_hashtag_collection_results.json', 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
+            
+            # 성공률 계산
+            successful = [r for r in results if r['success']]
+            success_rate = len(successful) / len(results) * 100
+            
+            print(f"\n{'='*60}")
+            print(f"실제 해시태그 수집 결과")
+            print(f"{'='*60}")
+            print(f"전체 테스트: {len(results)}개")
+            print(f"성공: {len(successful)}개")
+            print(f"성공률: {success_rate:.1f}%")
+            
+            if successful:
+                # 작성자 다양성 확인
+                authors = set(r['author'] for r in successful if 'author' in r)
+                print(f"발견된 작성자들: {len(authors)}명")
+                for author in authors:
+                    print(f"  - {author}")
+                
+                # 해시태그 다양성 확인
+                all_hashtags = []
+                for r in successful:
+                    if 'hashtags' in r:
+                        all_hashtags.extend(r['hashtags'])
+                unique_hashtags = set(all_hashtags)
+                print(f"발견된 해시태그: {len(unique_hashtags)}개")
+                
+                # 상위 해시태그
+                hashtag_counts = {}
+                for hashtag in all_hashtags:
+                    hashtag_counts[hashtag] = hashtag_counts.get(hashtag, 0) + 1
+                
+                top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                print(f"\n상위 해시태그:")
+                for hashtag, count in top_hashtags:
+                    try:
+                        print(f"  {hashtag}: {count}회")
+                    except:
+                        print(f"  [특수문자]: {count}회")
+                
+                if len(authors) > 1:
+                    print(f"\n성공! 다양한 채널의 비디오 수집됨!")
+                else:
+                    print(f"\n여전히 같은 채널만 수집됨...")
+            
+            return results
+            
+        except Exception as e:
+            print(f"오류: {e}")
+            return []
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    collect_real_hashtags()

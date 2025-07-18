@@ -1,0 +1,27 @@
+{
+  "page_title": "Trend Discovery: Hot content on TikTok",
+  "video_cards_count": 0,
+  "total_iframes": 0,
+  "hashtags_found": [],
+  "api_requests": [
+    "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=5&order_by=vv&country_code=KR",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/location",
+    "https://www.tiktok.com/api/v1/web-cookie-privacy/config?locale=en&appId=1988&theme=default&tea=1",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/location",
+    "https://ads.tiktok.com/creative_radar_api/v1/configure/safety",
+    "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/filters",
+    "https://ads.tiktok.com/creative_radar_api/v1/initial/location_info?module=4",
+    "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/filters",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/location",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/info",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/location",
+    "https://ads.tiktok.com/creative_radar_api/v1/initial/location_list",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/tt_info",
+    "https://ads.tiktok.com/creative_bff_i18n/api/public/whitelist/auth?platform=cc",
+    "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/filters",
+    "https://web-sg.tiktok.com/survey/api/feelgood/v1/event?trigger=@view&language=en",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/location",
+    "https://ads.tiktok.com/creative_radar_api/v1/user/info"
+  ],
+  "timestamp": "2025-07-15 14:19:23"
+}

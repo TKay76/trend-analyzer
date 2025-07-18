@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - API에서 직접 통계 데이터 가져오기
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+import json
+
+def fetch_trend_api_data():
+    """
+    발견된 API 엔드포인트에서 실제 데이터 가져오기
+    """
+    print("TikTok API 데이터 직접 조회...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            # 먼저 페이지를 로드해서 쿠키와 헤더를 얻습니다
+            print("페이지 로딩으로 인증 정보 획득...")
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            # 쿠키 정보 가져오기
+            cookies = page.context.cookies()
+            cookie_string = "; ".join([f"{cookie['name']}={cookie['value']}" for cookie in cookies])
+            
+            # 헤더 설정
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en',
+                'Cookie': cookie_string,
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
+            
+            print("API 호출 시작...")
+            
+            # 1. 메인 트렌드 리스트 API 호출
+            trend_api_url = "https://ads.tiktok.com/creative_radar_api/v1/popular_trend/list?period=7&page=1&limit=10&order_by=vv&country_code=KR"
+            
+            print(f"트렌드 API 호출: {trend_api_url}")
+            
+            try:
+                # Playwright로 API 호출 (브라우저 컨텍스트 유지)
+                response = page.request.get(trend_api_url)
+                
+                if response.status == 200:
+                    trend_data = response.json()
+                    print("트렌드 API 응답 성공!")
+                    print(f"응답 구조: {list(trend_data.keys()) if isinstance(trend_data, dict) else 'Not a dict'}")
+                    
+                    # 데이터 구조 분석
+                    if isinstance(trend_data, dict):
+                        if 'data' in trend_data:
+                            videos_data = trend_data['data']
+                            print(f"비디오 데이터 개수: {len(videos_data) if isinstance(videos_data, list) else 'Not a list'}")
+                            
+                            if isinstance(videos_data, list) and videos_data:
+                                first_video = videos_data[0]
+                                print(f"첫 번째 비디오 데이터 구조: {list(first_video.keys()) if isinstance(first_video, dict) else 'Not a dict'}")
+                                
+                                # 통계 정보 찾기
+                                for video in videos_data[:3]:
+                                    if isinstance(video, dict):
+                                        print(f"\n비디오 분석:")
+                                        for key, value in video.items():
+                                            if any(stat_word in key.lower() for stat_word in ['view', 'like', 'share', 'comment', 'count', 'play']):
+                                                print(f"  {key}: {value}")
+                                        
+                                        # ID 정보
+                                        if 'id' in video or 'video_id' in video or 'item_id' in video:
+                                            video_id = video.get('id') or video.get('video_id') or video.get('item_id')
+                                            print(f"  Video ID: {video_id}")
+                    
+                    # 전체 응답을 파일로 저장
+                    with open("trend_api_response.json", 'w', encoding='utf-8') as f:
+                        json.dump(trend_data, f, ensure_ascii=False, indent=2)
+                    print("트렌드 API 응답 저장: trend_api_response.json")
+                    
+                else:
+                    print(f"트렌드 API 호출 실패: Status {response.status}")
+                    print(f"응답 텍스트: {response.text()[:200]}...")
+            
+            except Exception as e:
+                print(f"트렌드 API 호출 중 오류: {e}")
+            
+            # 2. 개별 비디오 API 확인 (샘플 데이터로)
+            print(f"\n개별 비디오 API 탐색...")
+            
+            # 이미 수집한 비디오 ID로 테스트
+            sample_video_id = "7523040630352743688"
+            sample_secuid = "MS4wLjABAAAAplov3bw6JwAPxa9vOgAQs0IYguj0MnfVkuT1xAeGCs0"  # 샘플
+            
+            embed_api_url = f"https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=24&secUid={sample_secuid}&lang=en"
+            
+            print(f"개별 비디오 API 호출: {embed_api_url[:100]}...")
+            
+            try:
+                embed_response = page.request.get(embed_api_url)
+                
+                if embed_response.status == 200:
+                    embed_data = embed_response.json()
+                    print("개별 비디오 API 응답 성공!")
+                    print(f"응답 구조: {list(embed_data.keys()) if isinstance(embed_data, dict) else 'Not a dict'}")
+                    
+                    # 비디오 상세 정보 분석
+                    if isinstance(embed_data, dict) and 'itemList' in embed_data:
+                        videos = embed_data['itemList']
+                        print(f"비디오 리스트: {len(videos)}개")
+                        
+                        if videos:
+                            first_video = videos[0]
+                            print(f"첫 번째 비디오 키들: {list(first_video.keys())[:10]}")
+                            
+                            # 통계 정보 찾기
+                            stats_found = {}
+                            for key, value in first_video.items():
+                                if 'stats' in key.lower() or 'count' in key.lower():
+                                    stats_found[key] = value
+                            
+                            if stats_found:
+                                print(f"통계 정보 발견: {stats_found}")
+                            
+                            # stats 객체 내부 확인
+                            if 'stats' in first_video:
+                                stats_obj = first_video['stats']
+                                print(f"Stats 객체: {stats_obj}")
+                    
+                    # 개별 비디오 응답도 저장
+                    with open("embed_api_response.json", 'w', encoding='utf-8') as f:
+                        json.dump(embed_data, f, ensure_ascii=False, indent=2)
+                    print("개별 비디오 API 응답 저장: embed_api_response.json")
+                
+                else:
+                    print(f"개별 비디오 API 호출 실패: Status {embed_response.status}")
+            
+            except Exception as e:
+                print(f"개별 비디오 API 호출 중 오류: {e}")
+            
+            print("\n15초 후 브라우저 종료...")
+            page.wait_for_timeout(15000)
+            
+        except Exception as e:
+            print(f"전체 오류: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("API 데이터 조회 완료!")
+
+if __name__ == "__main__":
+    fetch_trend_api_data()

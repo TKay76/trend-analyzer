@@ -53,8 +53,17 @@ def setup_logging(name: str = None, level: str = "INFO", console_output: bool = 
         fmt='%(levelname)s | %(message)s'
     )
     
-    # 콘솔 핸들러 (간단한 포맷)
+    # 콘솔 핸들러 (간단한 포맷) - UTF-8 인코딩 강제
     if console_output:
+        # Windows에서 UTF-8 출력을 위한 설정
+        if sys.platform.startswith('win'):
+            import codecs
+            import io
+            if hasattr(sys.stdout, 'buffer'):
+                sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+            else:
+                # 이미 래핑된 경우 건너뛰기
+                pass
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(numeric_level)
         console_handler.setFormatter(simple_formatter)

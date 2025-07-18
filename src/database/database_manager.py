@@ -69,7 +69,7 @@ def create_tables():
             ugc_last_updated DATETIME, -- Last time UGC counts were updated
             is_trending INTEGER DEFAULT 0, -- 인기급상승 태그 (Biggest movers)
             is_new_hit INTEGER DEFAULT 0, -- 가장인기 있는 신곡 태그 (Highest debut)
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT (datetime('now', 'localtime')),
             UNIQUE(title, artist)
         )
         """,
@@ -84,7 +84,7 @@ def create_tables():
             daily_view_count INTEGER, -- 일일 조회수 (숫자)
             weekly_view_count INTEGER, -- 주간 조회수 (숫자)  
             engagement_rate REAL, -- 참여율 (소수점)
-            date DATE DEFAULT (date('now')),
+            date DATE DEFAULT (date('now', 'localtime')),
             FOREIGN KEY (song_id) REFERENCES songs (id),
             UNIQUE(song_id, source, category, date)
         )
@@ -96,7 +96,7 @@ def create_tables():
             hashtag TEXT NOT NULL,
             count INTEGER NOT NULL,
             rank INTEGER NOT NULL, -- 해당 곡에서의 해시태그 순위 (1-10)
-            collected_date DATE DEFAULT (date('now')),
+            collected_date DATE DEFAULT (date('now', 'localtime')),
             FOREIGN KEY (song_id) REFERENCES songs (id),
             UNIQUE(song_id, hashtag, collected_date)
         )
@@ -221,7 +221,7 @@ def add_trend(song_id, source, category, rank, metrics=None, daily_view_count=No
     sql = """
     INSERT OR REPLACE INTO daily_trends 
     (song_id, source, category, rank, metrics, daily_view_count, weekly_view_count, engagement_rate, date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now'));
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now', 'localtime'));
     """
     with get_db_connection() as conn:
         cur = conn.cursor()
@@ -242,7 +242,7 @@ def update_ugc_counts(song_id, youtube_count=None, tiktok_count=None):
         params.append(tiktok_count)
     
     if updates:
-        updates.append("ugc_last_updated = CURRENT_TIMESTAMP")
+        updates.append("ugc_last_updated = datetime('now', 'localtime')")
         params.append(song_id)
         
         sql = f"UPDATE songs SET {', '.join(updates)} WHERE id = ?"
@@ -268,13 +268,13 @@ def save_song_hashtags(song_id, top_hashtags):
     # 기존 해시태그 데이터 삭제 (오늘 날짜)
     delete_sql = """
     DELETE FROM song_hashtags 
-    WHERE song_id = ? AND collected_date = date('now')
+    WHERE song_id = ? AND collected_date = date('now', 'localtime')
     """
     
     # 새 해시태그 데이터 삽입
     insert_sql = """
     INSERT INTO song_hashtags (song_id, hashtag, count, rank, collected_date)
-    VALUES (?, ?, ?, ?, date('now'))
+    VALUES (?, ?, ?, ?, date('now', 'localtime'))
     """
     
     with get_db_connection() as conn:

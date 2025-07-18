@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Shares 카테고리에서 해시태그와 함께 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import re
+
+def extract_hashtags_from_text(text):
+    """
+    텍스트에서 해시태그 추출
+    """
+    if not text:
+        return []
+    
+    hashtags = re.findall(r'#\w+', text)
+    return hashtags
+
+def collect_shares_with_hashtags():
+    """
+    Shares 카테고리에서 해시태그와 함께 수집
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok Creative Center - Shares 카테고리 해시태그 수집...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(8000)
+            
+            # Shares 정렬로 변경
+            print("\n정렬을 Shares로 변경...")
+            try:
+                # 정렬 드롭다운 클릭
+                sort_button = page.query_selector('span.ListFilter_sortWrapSelectLabel__VCgtO')
+                if sort_button:
+                    sort_button.click()
+                    page.wait_for_timeout(2000)
+                    
+                    # Shares 옵션 클릭
+                    shares_option = page.query_selector('text="Shares"')
+                    if shares_option and shares_option.is_visible():
+                        shares_option.click()
+                        page.wait_for_timeout(15000)  # 긴 대기 시간
+                        print("Shares 정렬 적용 완료!")
+                        
+                        # 여러 번 스크롤로 콘텐츠 로드 유도
+                        for scroll_attempt in range(3):
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            page.wait_for_timeout(2000)
+                            print(f"추가 스크롤 {scroll_attempt + 1}/3")
+                    else:
+                        print("Shares 옵션 찾기 실패")
+                        return
+                else:
+                    print("정렬 드롭다운 찾기 실패")
+                    return
+            except Exception as e:
+                print(f"정렬 변경 실패: {e}")
+                return
+            
+            scraped_videos = []
+            seen_video_ids = set()
+            click_count = 0
+            max_clicks = 8
+            
+            while len(scraped_videos) < 10 and click_count < max_clicks:  # 일단 10개만 테스트
+                print(f"\nShares - 수집 라운드 {click_count + 1}")
+                print(f"현재까지 수집: {len(scraped_videos)}/10개")
+                
+                # 스크롤
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(3000)
+                
+                # 비디오 카드 대기
+                try:
+                    page.wait_for_selector("div.CommonGridLayoutDataList_cardWrapper__jkA9g", timeout=15000)
+                    print("비디오 카드 로딩 완료")
+                except:
+                    try:
+                        page.wait_for_selector("blockquote.IframeEmbedVideo_embedQuote__BdyWZ", timeout=10000)
+                        print("embed 요소 로딩 완료")
+                    except:
+                        print("비디오 요소를 찾을 수 없음")
+                        break
+                
+                # HTML 분석
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # 비디오 카드들 찾기
+                video_cards = soup.select("div.CommonGridLayoutDataList_cardWrapper__jkA9g")
+                if not video_cards:
+                    video_cards = soup.select("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                    print(f"대안 셀렉터로 {len(video_cards)}개 발견")
+                else:
+                    print(f"기본 셀렉터로 {len(video_cards)}개 발견")
+                
+                new_videos_found = 0
+                
+                for card in video_cards:
+                    # embed 요소 찾기
+                    if card.name == 'blockquote':
+                        embed_quote = card
+                    else:
+                        embed_quote = card.select_one("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                    
+                    if not embed_quote:
+                        continue
+                    
+                    # 비디오 ID 추출
+                    video_id = embed_quote.get('data-video-id', '')
+                    if not video_id or video_id in seen_video_ids:
+                        continue
+                    
+                    seen_video_ids.add(video_id)
+                    
+                    # 기본 정보 수집
+                    tiktok_url = embed_quote.get('cite', '')
+                    iframe = embed_quote.select_one("iframe")
+                    embed_url = iframe.get('src', '') if iframe else ""
+                    thumbnail_url = f"https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/{video_id}~tplv-tiktokx-origin.image"
+                    
+                    # 해시태그 수집 시도
+                    hashtags = []
+                    
+                    # 1. embed 요소 자체에서 해시태그 찾기
+                    embed_text = embed_quote.get_text()
+                    if embed_text:
+                        hashtags.extend(extract_hashtags_from_text(embed_text))
+                    
+                    # 2. 상위 컨테이너에서 해시태그 찾기
+                    parent = card.parent
+                    if parent:
+                        parent_text = parent.get_text()
+                        hashtags.extend(extract_hashtags_from_text(parent_text))
+                    
+                    # 3. 카드 전체에서 해시태그 찾기
+                    card_text = card.get_text()
+                    hashtags.extend(extract_hashtags_from_text(card_text))
+                    
+                    # 4. 주변 형제 요소들에서 해시태그 찾기
+                    for sibling in card.find_next_siblings():
+                        if sibling.name:
+                            sibling_text = sibling.get_text()
+                            hashtags.extend(extract_hashtags_from_text(sibling_text))
+                    
+                    # 5. 모든 텍스트 노드에서 해시태그 찾기
+                    all_text_in_card = ' '.join([text.strip() for text in card.stripped_strings])
+                    hashtags.extend(extract_hashtags_from_text(all_text_in_card))
+                    
+                    # 중복 제거
+                    hashtags = list(set(hashtags))
+                    
+                    # 비디오 데이터 생성
+                    video_data = {
+                        "rank": len(scraped_videos) + 1,
+                        "category": "Shares",
+                        "video_id": video_id,
+                        "tiktok_url": tiktok_url,
+                        "embed_url": embed_url,
+                        "thumbnail_url": thumbnail_url,
+                        "hashtags": hashtags,
+                        "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "raw_text": all_text_in_card[:200] + "..." if len(all_text_in_card) > 200 else all_text_in_card
+                    }
+                    
+                    scraped_videos.append(video_data)
+                    new_videos_found += 1
+                    
+                    print(f"  Shares #{len(scraped_videos)}: {video_id}")
+                    print(f"    해시태그: {hashtags}")
+                    print(f"    텍스트 샘플: {all_text_in_card[:100]}...")
+                    print()
+                    
+                    if len(scraped_videos) >= 10:  # 테스트용 10개
+                        break
+                
+                print(f"이번 라운드에서 {new_videos_found}개 새 비디오 추가")
+                
+                # 10개 달성 확인
+                if len(scraped_videos) >= 10:
+                    print("Shares - 목표 10개 달성!")
+                    break
+                
+                # View More 버튼 클릭
+                try:
+                    view_more = page.query_selector('text="View More"')
+                    if view_more and view_more.is_visible():
+                        print("Shares - View More 클릭!")
+                        view_more.click()
+                        page.wait_for_timeout(4000)
+                    else:
+                        print("Shares - View More 버튼 없음")
+                        break
+                except Exception as e:
+                    print(f"Shares - View More 클릭 실패: {e}")
+                    break
+                
+                click_count += 1
+            
+            # 결과 저장
+            result = {
+                "scrape_info": {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "category": "Shares",
+                    "target_url": target_url,
+                    "total_videos": len(scraped_videos),
+                    "view_more_clicks": click_count,
+                    "method": "page_text_extraction"
+                },
+                "videos": scraped_videos
+            }
+            
+            filename = "tiktok_shares_with_hashtags_test.json"
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n{'='*50}")
+            print(f"Shares 카테고리 해시태그 수집 완료!")
+            print(f"{'='*50}")
+            print(f"결과 파일: {filename}")
+            print(f"수집된 비디오: {len(scraped_videos)}개")
+            print(f"View More 클릭: {click_count}회")
+            
+            # 해시태그 통계
+            all_hashtags = {}
+            for video in scraped_videos:
+                for hashtag in video['hashtags']:
+                    all_hashtags[hashtag] = all_hashtags.get(hashtag, 0) + 1
+            
+            if all_hashtags:
+                print(f"\n해시태그 통계:")
+                print(f"총 유니크 해시태그: {len(all_hashtags)}개")
+                top_hashtags = sorted(all_hashtags.items(), key=lambda x: x[1], reverse=True)[:10]
+                for hashtag, count in top_hashtags:
+                    print(f"  {hashtag}: {count}회")
+            else:
+                print("\n해시태그를 찾을 수 없었습니다.")
+            
+            print("\n10초 후 브라우저 종료...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("Shares 카테고리 해시태그 수집 완료!")
+
+if __name__ == "__main__":
+    collect_shares_with_hashtags()

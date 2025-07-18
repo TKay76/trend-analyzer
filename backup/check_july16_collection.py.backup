@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""
+7월 16일 수집 데이터 확인 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+from datetime import datetime
+
+def check_july16_collection():
+    """7월 16일 수집된 데이터 확인"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 70)
+        print("📅 2025-07-16 수집 데이터 확인")
+        print("=" * 70)
+        
+        # 당일 업데이트된 TikTok UGC 데이터
+        cursor.execute("""
+            SELECT title, artist, tiktok_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE DATE(ugc_last_updated) = '2025-07-16'
+              AND tiktok_ugc_count IS NOT NULL
+            ORDER BY ugc_last_updated DESC
+        """)
+        tiktok_daily = cursor.fetchall()
+        
+        print(f"🎭 당일 TikTok UGC 수집: {len(tiktok_daily)}곡")
+        if tiktok_daily:
+            print("   📊 수집된 곡 목록:")
+            for i, song in enumerate(tiktok_daily[:10], 1):  # 상위 10곡
+                print(f"   {i:2d}. {song[0]} - {song[1]}: {song[2]:,}개")
+                print(f"       수집시간: {song[3]}")
+            if len(tiktok_daily) > 10:
+                print(f"       ... 외 {len(tiktok_daily)-10}곡")
+        print()
+        
+        # 당일 업데이트된 YouTube UGC 데이터  
+        cursor.execute("""
+            SELECT title, artist, youtube_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE DATE(ugc_last_updated) = '2025-07-16'
+              AND youtube_ugc_count IS NOT NULL
+            ORDER BY ugc_last_updated DESC
+        """)
+        youtube_daily = cursor.fetchall()
+        
+        print(f"📺 당일 YouTube UGC 수집: {len(youtube_daily)}곡")
+        if youtube_daily:
+            print("   📊 수집된 곡 목록:")
+            for i, song in enumerate(youtube_daily[:10], 1):  # 상위 10곡
+                print(f"   {i:2d}. {song[0]} - {song[1]}: {song[2]:,}개")
+                print(f"       수집시간: {song[3]}")
+            if len(youtube_daily) > 10:
+                print(f"       ... 외 {len(youtube_daily)-10}곡")
+        print()
+        
+        # 당일 수집된 해시태그 데이터
+        cursor.execute("""
+            SELECT COUNT(DISTINCT s.song_id) as songs_with_hashtags,
+                   COUNT(*) as total_hashtags
+            FROM song_hashtags s
+            JOIN songs song ON s.song_id = song.id
+            WHERE DATE(song.ugc_last_updated) = '2025-07-16'
+        """)
+        hashtag_stats = cursor.fetchone()
+        
+        print(f"📌 당일 해시태그 수집:")
+        print(f"   🎵 해시태그 수집 곡: {hashtag_stats[0]}곡")
+        print(f"   📊 총 해시태그 수: {hashtag_stats[1]}개")
+        if hashtag_stats[0] > 0:
+            print(f"   📈 곡당 평균: {hashtag_stats[1]/hashtag_stats[0]:.1f}개")
+        print()
+        
+        # 당일 인기 해시태그 TOP 10
+        cursor.execute("""
+            SELECT sh.hashtag, SUM(sh.count) as total_count
+            FROM song_hashtags sh
+            JOIN songs s ON sh.song_id = s.id
+            WHERE DATE(s.ugc_last_updated) = '2025-07-16'
+            GROUP BY sh.hashtag
+            ORDER BY total_count DESC
+            LIMIT 10
+        """)
+        popular_hashtags = cursor.fetchall()
+        
+        if popular_hashtags:
+            print("🔥 당일 인기 해시태그 TOP 10:")
+            for i, (tag, count) in enumerate(popular_hashtags, 1):
+                print(f"   {i:2d}. #{tag}: {count:,}회")
+        print()
+        
+        # 당일 수집 곡별 상세 해시태그 정보 (상위 5곡)
+        cursor.execute("""
+            SELECT s.title, s.artist, s.tiktok_ugc_count, 
+                   COUNT(sh.hashtag) as hashtag_count
+            FROM songs s
+            LEFT JOIN song_hashtags sh ON s.id = sh.song_id
+            WHERE DATE(s.ugc_last_updated) = '2025-07-16'
+              AND s.tiktok_ugc_count IS NOT NULL
+            GROUP BY s.id, s.title, s.artist, s.tiktok_ugc_count
+            ORDER BY s.tiktok_ugc_count DESC
+            LIMIT 5
+        """)
+        top_songs = cursor.fetchall()
+        
+        if top_songs:
+            print("🎯 당일 수집 TOP 5 곡 상세 정보:")
+            for i, (title, artist, ugc_count, hashtag_count) in enumerate(top_songs, 1):
+                print(f"   {i}. {title} - {artist}")
+                print(f"      🎭 TikTok UGC: {ugc_count:,}개")
+                print(f"      📌 해시태그: {hashtag_count}개")
+                
+                # 해당 곡의 해시태그 목록
+                cursor.execute("""
+                    SELECT hashtag, count
+                    FROM song_hashtags sh
+                    JOIN songs s ON sh.song_id = s.id
+                    WHERE s.title = ? AND s.artist = ?
+                    ORDER BY count DESC
+                    LIMIT 5
+                """, (title, artist))
+                song_hashtags = cursor.fetchall()
+                
+                if song_hashtags:
+                    hashtag_list = [f"#{tag}({count})" for tag, count in song_hashtags]
+                    print(f"      🏷️ 주요 해시태그: {', '.join(hashtag_list)}")
+                print()
+        
+        # 전체 통계 비교
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_songs,
+                COUNT(CASE WHEN tiktok_ugc_count IS NOT NULL THEN 1 END) as tiktok_collected,
+                COUNT(CASE WHEN youtube_ugc_count IS NOT NULL THEN 1 END) as youtube_collected
+            FROM songs
+        """)
+        total_stats = cursor.fetchone()
+        
+        cursor.execute("""
+            SELECT COUNT(DISTINCT song_id) as total_songs_with_hashtags,
+                   COUNT(*) as total_hashtags
+            FROM song_hashtags
+        """)
+        total_hashtag_stats = cursor.fetchone()
+        
+        print("📊 전체 데이터베이스 현황:")
+        print(f"   🎵 총 곡 수: {total_stats[0]}곡")
+        print(f"   🎭 TikTok UGC 수집: {total_stats[1]}곡")
+        print(f"   📺 YouTube UGC 수집: {total_stats[2]}곡")
+        print(f"   📌 해시태그 보유 곡: {total_hashtag_stats[0]}곡")
+        print(f"   📊 총 해시태그: {total_hashtag_stats[1]}개")
+        print()
+        
+        print("🎯 7월 16일 수집 요약:")
+        print(f"   🎭 TikTok: {len(tiktok_daily)}곡")
+        print(f"   📺 YouTube: {len(youtube_daily)}곡") 
+        print(f"   📌 해시태그: {hashtag_stats[1]}개")
+        print(f"   📈 수집 성과: {'✅ 성공' if len(tiktok_daily) > 0 else '❌ 수집 없음'}")
+        print("=" * 70)
+
+if __name__ == "__main__":
+    check_july16_collection()

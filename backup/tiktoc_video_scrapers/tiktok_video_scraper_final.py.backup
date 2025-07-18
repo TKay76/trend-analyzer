@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Video 스크래퍼 (최종 버전)
+올바른 셀렉터로 비디오 데이터 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import sys
+import os
+
+def scrape_tiktok_videos():
+    """
+    TikTok Creative Center에서 상위 30개 비디오 데이터 수집
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok 비디오 스크래퍼 시작...")
+    print(f"URL: {target_url}")
+    print("목표: 상위 30개 비디오의 주소, 썸네일, 해시태그")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            print("페이지 로딩 완료")
+            
+            scraped_videos = []
+            seen_video_ids = set()  # 중복 방지
+            
+            # View More 버튼을 반복적으로 클릭하면서 30개까지 수집
+            click_count = 0
+            max_clicks = 10  # 최대 10번 클릭 (안전장치)
+            
+            while len(scraped_videos) < 30 and click_count < max_clicks:
+                print(f"\n--- 수집 라운드 {click_count + 1} ---")
+                print(f"현재까지 수집된 비디오: {len(scraped_videos)}개")
+                
+                # 페이지 스크롤
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(2000)
+                
+                # 비디오 카드 요소들 대기
+                try:
+                    page.wait_for_selector("div.CommonGridLayoutDataList_cardWrapper__jkA9g", timeout=10000)
+                except:
+                    print("비디오 카드를 찾을 수 없음")
+                    break
+                
+                # HTML 분석
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # 비디오 카드들 찾기
+                video_cards = soup.select("div.CommonGridLayoutDataList_cardWrapper__jkA9g")
+                print(f"페이지에서 발견된 비디오 카드: {len(video_cards)}개")
+                
+                new_videos_found = 0
+                
+                for card in video_cards:
+                    # 비디오 embed 요소 찾기
+                    embed_quote = card.select_one("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                    if not embed_quote:
+                        continue
+                    
+                    # 비디오 ID 추출
+                    video_id = embed_quote.get('data-video-id', '')
+                    if not video_id or video_id in seen_video_ids:
+                        continue
+                    
+                    seen_video_ids.add(video_id)
+                    
+                    # TikTok URL 추출
+                    tiktok_url = embed_quote.get('cite', '')
+                    
+                    # iframe에서 embed URL 추출
+                    iframe = embed_quote.select_one("iframe")
+                    embed_url = ""
+                    if iframe:
+                        embed_url = iframe.get('src', '')
+                    
+                    # 썸네일은 iframe 로드 후 추출 가능하지만, 일단 기본 패턴 사용
+                    # TikTok 썸네일 패턴: https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/VIDEO_ID~tplv-...
+                    thumbnail_url = f"https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/{video_id}~tplv-dy-cs-s690x540.jpeg"
+                    
+                    # 해시태그는 카드 주변 텍스트에서 추출
+                    card_text = card.get_text()
+                    hashtags = []
+                    
+                    # 해시태그 패턴 찾기 (# 시작하는 단어들)
+                    words = card_text.split()
+                    for word in words:
+                        if word.startswith('#') and len(word) > 1:
+                            hashtag = word.strip('.,!?()[]{}":;')
+                            if hashtag not in hashtags:
+                                hashtags.append(hashtag)
+                    
+                    # 비디오 데이터 저장
+                    video_data = {
+                        "rank": len(scraped_videos) + 1,
+                        "video_id": video_id,
+                        "tiktok_url": tiktok_url,
+                        "embed_url": embed_url,
+                        "thumbnail_url": thumbnail_url,
+                        "hashtags": hashtags,
+                        "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    
+                    scraped_videos.append(video_data)
+                    new_videos_found += 1
+                    
+                    print(f"  비디오 {len(scraped_videos)}: ID {video_id}")
+                    if hashtags:
+                        print(f"    해시태그: {hashtags[:3]}")
+                    
+                    # 30개 달성 시 종료
+                    if len(scraped_videos) >= 30:
+                        break
+                
+                print(f"이번 라운드에서 새로 발견된 비디오: {new_videos_found}개")
+                
+                # 30개 달성했으면 종료
+                if len(scraped_videos) >= 30:
+                    print("목표 30개 달성!")
+                    break
+                
+                # View More 버튼 찾기 및 클릭
+                print("View More 버튼 찾는 중...")
+                view_more_clicked = False
+                
+                try:
+                    # 다양한 셀렉터로 View More 버튼 찾기
+                    view_more_selectors = [
+                        "text=\"View More\"",
+                        "button:has-text('View More')",
+                        "[class*='viewMore']",
+                        "[class*='loadMore']",
+                        "button[class*='Button'][class*='primary']"
+                    ]
+                    
+                    for selector in view_more_selectors:
+                        try:
+                            view_more = page.query_selector(selector)
+                            if view_more and view_more.is_visible():
+                                print(f"View More 버튼 발견! 클릭...")
+                                view_more.click()
+                                view_more_clicked = True
+                                page.wait_for_timeout(3000)  # 로딩 대기
+                                break
+                        except:
+                            continue
+                    
+                    if not view_more_clicked:
+                        print("View More 버튼을 찾을 수 없음")
+                        break
+                        
+                except Exception as e:
+                    print(f"View More 클릭 실패: {e}")
+                    break
+                
+                click_count += 1
+            
+            # 결과 저장
+            result = {
+                "scrape_info": {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "target_url": target_url,
+                    "total_videos_collected": len(scraped_videos),
+                    "view_more_clicks": click_count
+                },
+                "videos": scraped_videos
+            }
+            
+            with open("tiktok_videos_final.json", 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n=== 수집 완료 ===")
+            print(f"총 수집된 비디오: {len(scraped_videos)}개")
+            print(f"View More 클릭 횟수: {click_count}회")
+            print(f"결과 저장: tiktok_videos_final.json")
+            
+            # 수집된 비디오 요약
+            if scraped_videos:
+                print(f"\n수집된 비디오 요약:")
+                for i, video in enumerate(scraped_videos[:5]):
+                    print(f"  {i+1}. ID: {video['video_id']}")
+                    print(f"     URL: {video['tiktok_url']}")
+                    if video['hashtags']:
+                        print(f"     해시태그: {video['hashtags'][:3]}")
+                
+                if len(scraped_videos) > 5:
+                    print(f"  ... 외 {len(scraped_videos) - 5}개")
+            
+            print("\n10초 후 브라우저 종료...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("TikTok 비디오 스크래핑 완료!")
+
+if __name__ == "__main__":
+    scrape_tiktok_videos()

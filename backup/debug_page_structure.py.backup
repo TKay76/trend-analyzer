@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""
+페이지 구조 디버깅 및 실제 데이터 확인
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+
+def debug_page_structure():
+    """페이지 구조 상세 분석"""
+    print("TikTok Creative Center 페이지 구조 디버깅...")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("페이지 로딩...")
+            page.goto("https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en", timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 페이지 제목 확인
+            title = page.title()
+            print(f"페이지 제목: {title}")
+            
+            # 비디오 카드 찾기
+            video_cards = page.query_selector_all('.CommonGridLayoutDataList_cardWrapper__jkA9g')
+            print(f"비디오 카드 수: {len(video_cards)}")
+            
+            if video_cards:
+                # 첫 번째 카드 상세 분석
+                first_card = video_cards[0]
+                print(f"\n=== 첫 번째 비디오 카드 분석 ===")
+                
+                # HTML 구조 출력
+                html = first_card.inner_html()
+                print(f"HTML 길이: {len(html)} 문자")
+                
+                with open('debug_card_html.html', 'w', encoding='utf-8') as f:
+                    f.write(html)
+                print("카드 HTML 저장: debug_card_html.html")
+                
+                # 텍스트 내용 확인
+                text_content = first_card.inner_text()
+                print(f"텍스트 내용: '{text_content}'")
+                print(f"텍스트 길이: {len(text_content)}")
+                
+                # iframe 확인
+                iframes = first_card.query_selector_all('iframe')
+                print(f"iframe 개수: {len(iframes)}")
+                
+                for i, iframe in enumerate(iframes):
+                    src = iframe.get_attribute('src')
+                    print(f"  iframe {i+1} src: {src}")
+                
+                # 이미지 확인
+                images = first_card.query_selector_all('img')
+                print(f"이미지 개수: {len(images)}")
+                
+                for i, img in enumerate(images):
+                    src = img.get_attribute('src')
+                    alt = img.get_attribute('alt')
+                    print(f"  이미지 {i+1} src: {src}")
+                    print(f"  이미지 {i+1} alt: {alt}")
+                
+                # 모든 속성이 있는 요소들 찾기
+                elements_with_data = first_card.query_selector_all('[data-*], [class*="video"], [class*="id"]')
+                print(f"데이터 속성 요소: {len(elements_with_data)}개")
+                
+                for i, element in enumerate(elements_with_data[:5]):
+                    tag_name = element.evaluate('el => el.tagName')
+                    class_name = element.get_attribute('class')
+                    print(f"  요소 {i+1}: {tag_name}, class: {class_name}")
+            
+            # 전체 페이지에서 iframe 찾기
+            print(f"\n=== 전체 페이지 iframe 분석 ===")
+            all_iframes = page.query_selector_all('iframe')
+            print(f"전체 iframe 개수: {len(all_iframes)}")
+            
+            for i, iframe in enumerate(all_iframes[:10]):  # 최대 10개만
+                src = iframe.get_attribute('src')
+                if src and '/video/' in src:
+                    video_id = src.split('/video/')[-1].split('?')[0]
+                    print(f"  iframe {i+1}: video_id = {video_id}")
+            
+            # 페이지의 모든 텍스트에서 해시태그 찾기
+            print(f"\n=== 전체 페이지 해시태그 분석 ===")
+            page_text = page.inner_text('body')
+            
+            import re
+            hashtags = re.findall(r'#\w+', page_text)
+            unique_hashtags = list(set(hashtags))
+            print(f"페이지 전체 해시태그: {len(unique_hashtags)}개")
+            if unique_hashtags:
+                print(f"해시태그 예시: {unique_hashtags[:10]}")
+            
+            # 특정 패턴으로 비디오 관련 요소 찾기
+            print(f"\n=== 비디오 관련 요소 검색 ===")
+            video_patterns = [
+                '[href*="/video/"]',
+                '[src*="/video/"]', 
+                '[class*="Video"]',
+                '[data-testid*="video"]'
+            ]
+            
+            for pattern in video_patterns:
+                elements = page.query_selector_all(pattern)
+                print(f"패턴 '{pattern}': {len(elements)}개 요소")
+                
+                for element in elements[:3]:
+                    href = element.get_attribute('href')
+                    src = element.get_attribute('src')
+                    if href:
+                        print(f"  href: {href}")
+                    if src:
+                        print(f"  src: {src}")
+            
+            # 네트워크 요청 모니터링 (5초간)
+            print(f"\n=== 네트워크 요청 모니터링 ===")
+            requests_captured = []
+            
+            def handle_request(request):
+                url = request.url
+                if 'api' in url.lower() or 'video' in url.lower():
+                    requests_captured.append(url)
+            
+            page.on('request', handle_request)
+            
+            # 페이지 새로고침
+            page.reload()
+            page.wait_for_timeout(5000)
+            
+            print(f"캡처된 API 요청: {len(requests_captured)}개")
+            for req in requests_captured[:5]:
+                print(f"  {req}")
+            
+            # 결과를 JSON으로 저장
+            debug_info = {
+                'page_title': title,
+                'video_cards_count': len(video_cards),
+                'total_iframes': len(all_iframes),
+                'hashtags_found': unique_hashtags,
+                'api_requests': requests_captured,
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            with open('debug_page_structure.json', 'w', encoding='utf-8') as f:
+                import json
+                json.dump(debug_info, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n디버그 정보 저장: debug_page_structure.json")
+            
+        except Exception as e:
+            print(f"오류: {e}")
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    debug_page_structure()

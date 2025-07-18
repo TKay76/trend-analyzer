@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 실제 TikTok 링크와 이미지 분석
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def analyze_actual_tiktok_content():
+    """
+    발견된 TikTok 링크와 이미지들을 직접 분석
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok 실제 콘텐츠 분석...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 스크롤해서 콘텐츠 로드
+            print("페이지 스크롤...")
+            for i in range(3):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(2000)
+            
+            # HTML 분석
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            print("\n=== TikTok 링크 분석 ===")
+            tiktok_links = soup.select("a[href*='tiktok.com']")
+            print(f"총 TikTok 링크: {len(tiktok_links)}개")
+            
+            link_analysis = []
+            for i, link in enumerate(tiktok_links[:10]):  # 상위 10개만
+                href = link.get('href', '')
+                text = link.get_text().strip()
+                parent = link.parent
+                
+                # 부모 요소에서 이미지 찾기
+                parent_images = parent.select("img") if parent else []
+                thumbnail = ""
+                if parent_images:
+                    thumbnail = parent_images[0].get('src', '')
+                    if thumbnail.startswith('//'):
+                        thumbnail = 'https:' + thumbnail
+                
+                # 부모 요소 텍스트
+                parent_text = parent.get_text().strip() if parent else ""
+                hashtags = [word.strip('.,!?') for word in parent_text.split() if word.startswith('#')]
+                
+                link_data = {
+                    "rank": i + 1,
+                    "href": href,
+                    "link_text": text[:50],
+                    "thumbnail": thumbnail,
+                    "hashtags": hashtags[:5],
+                    "parent_text": ' '.join(parent_text.split()[:10])
+                }
+                
+                link_analysis.append(link_data)
+                print(f"\n링크 {i+1}:")
+                print(f"  URL: {href[:60]}...")
+                print(f"  텍스트: {text[:30]}...")
+                if thumbnail:
+                    print(f"  썸네일: {thumbnail[:50]}...")
+                if hashtags:
+                    print(f"  해시태그: {hashtags}")
+                if parent_text:
+                    print(f"  부모텍스트: {parent_text[:50]}...")
+            
+            print("\n=== TikTok 이미지 분석 ===")
+            tiktok_images = soup.select("img[src*='tiktok']")
+            print(f"총 TikTok 이미지: {len(tiktok_images)}개")
+            
+            image_analysis = []
+            for i, img in enumerate(tiktok_images[:10]):  # 상위 10개만
+                src = img.get('src', '')
+                alt = img.get('alt', '')
+                parent = img.parent
+                
+                # 부모 요소에서 링크 찾기
+                parent_links = parent.select("a") if parent else []
+                video_link = ""
+                if parent_links:
+                    video_link = parent_links[0].get('href', '')
+                    if video_link.startswith('/'):
+                        video_link = 'https://ads.tiktok.com' + video_link
+                
+                # 부모 요소 텍스트
+                parent_text = parent.get_text().strip() if parent else ""
+                hashtags = [word.strip('.,!?') for word in parent_text.split() if word.startswith('#')]
+                
+                # TikTok 비디오 URL 패턴 확인
+                is_video_thumbnail = (
+                    'tiktokcdn.com' in src and 
+                    ('video' in src.lower() or 'tos-' in src) and
+                    'trend_tab' not in src  # 카테고리 아이콘 제외
+                )
+                
+                image_data = {
+                    "rank": i + 1,
+                    "src": src,
+                    "alt": alt,
+                    "video_link": video_link,
+                    "hashtags": hashtags[:5],
+                    "parent_text": ' '.join(parent_text.split()[:10]),
+                    "is_video_thumbnail": is_video_thumbnail
+                }
+                
+                image_analysis.append(image_data)
+                print(f"\n이미지 {i+1}:")
+                print(f"  URL: {src[:60]}...")
+                if alt:
+                    print(f"  Alt: {alt[:30]}...")
+                if video_link:
+                    print(f"  비디오링크: {video_link[:50]}...")
+                if hashtags:
+                    print(f"  해시태그: {hashtags}")
+                if is_video_thumbnail:
+                    print("  >>> 실제 비디오 썸네일로 판단! <<<")
+            
+            # 실제 비디오 콘텐츠 찾기
+            print("\n=== 실제 비디오 콘텐츠 검색 ===")
+            actual_videos = []
+            
+            # 비디오 썸네일이 있는 부모 요소들 분석
+            video_thumbnails = [img for img in image_analysis if img['is_video_thumbnail']]
+            print(f"비디오 썸네일로 판단되는 이미지: {len(video_thumbnails)}개")
+            
+            for video_thumb in video_thumbnails:
+                actual_videos.append({
+                    "thumbnail": video_thumb['src'],
+                    "video_link": video_thumb['video_link'],
+                    "hashtags": video_thumb['hashtags'],
+                    "text_preview": video_thumb['parent_text']
+                })
+            
+            # View More 버튼 확인
+            print("\nView More 버튼 확인...")
+            try:
+                view_more = page.query_selector("text=\"View More\"")
+                view_more_available = view_more and view_more.is_visible()
+                print(f"View More 사용 가능: {view_more_available}")
+            except:
+                view_more_available = False
+            
+            # 결과 저장
+            result = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "analysis_summary": {
+                    "total_tiktok_links": len(tiktok_links),
+                    "total_tiktok_images": len(tiktok_images),
+                    "video_thumbnails_found": len(video_thumbnails),
+                    "actual_videos_detected": len(actual_videos)
+                },
+                "view_more_available": view_more_available,
+                "link_analysis": link_analysis,
+                "image_analysis": image_analysis,
+                "detected_videos": actual_videos
+            }
+            
+            with open("tiktok_content_analysis.json", 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n분석 결과 저장: tiktok_content_analysis.json")
+            print(f"실제 비디오로 감지된 콘텐츠: {len(actual_videos)}개")
+            
+            if actual_videos:
+                print("\n발견된 비디오들:")
+                for i, video in enumerate(actual_videos[:3]):
+                    print(f"  {i+1}. 썸네일: {video['thumbnail'][:50]}...")
+                    if video['hashtags']:
+                        print(f"     해시태그: {video['hashtags']}")
+            
+            print("\n15초 후 브라우저 종료...")
+            page.wait_for_timeout(15000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+        
+        finally:
+            browser.close()
+    
+    print("TikTok 콘텐츠 분석 완료!")
+
+if __name__ == "__main__":
+    analyze_actual_tiktok_content()

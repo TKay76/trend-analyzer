@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - Video 스크래퍼 (통계 정보 포함)
+조회수, 썸네일, 해시태그, 작성자 정보까지 모든 데이터 수집
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+import re
+
+def scrape_tiktok_videos_with_stats():
+    """
+    TikTok Creative Center에서 상위 30개 비디오와 통계 정보 수집
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok 비디오 + 통계 정보 스크래퍼 시작...")
+    print(f"URL: {target_url}")
+    print("목표: 상위 30개 비디오의 주소, 썸네일, 해시태그, 조회수")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            scraped_videos = []
+            seen_video_ids = set()
+            collected_secuids = set()  # API 호출에 사용된 secuid 추적
+            
+            # View More 버튼을 반복적으로 클릭하면서 30개까지 수집
+            click_count = 0
+            max_clicks = 10
+            
+            while len(scraped_videos) < 30 and click_count < max_clicks:
+                print(f"\n--- 수집 라운드 {click_count + 1} ---")
+                print(f"현재까지 수집된 비디오: {len(scraped_videos)}개")
+                
+                # 페이지 스크롤
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(2000)
+                
+                # 비디오 카드 요소들 대기
+                try:
+                    page.wait_for_selector("div.CommonGridLayoutDataList_cardWrapper__jkA9g", timeout=10000)
+                except:
+                    print("비디오 카드를 찾을 수 없음")
+                    break
+                
+                # HTML 분석으로 기본 정보 수집
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                video_cards = soup.select("div.CommonGridLayoutDataList_cardWrapper__jkA9g")
+                
+                print(f"페이지에서 발견된 비디오 카드: {len(video_cards)}개")
+                
+                # 각 비디오 카드에서 iframe 분석
+                for card in video_cards:
+                    embed_quote = card.select_one("blockquote.IframeEmbedVideo_embedQuote__BdyWZ")
+                    if not embed_quote:
+                        continue
+                    
+                    video_id = embed_quote.get('data-video-id', '')
+                    if not video_id or video_id in seen_video_ids:
+                        continue
+                    
+                    seen_video_ids.add(video_id)
+                    
+                    # 기본 정보 수집
+                    tiktok_url = embed_quote.get('cite', '')
+                    iframe = embed_quote.select_one("iframe")
+                    embed_url = iframe.get('src', '') if iframe else ""
+                    
+                    # iframe URL에서 secUid 추출 시도
+                    iframe_content = page.query_selector(f"iframe[title='{video_id}']")
+                    secuid_for_api = None
+                    
+                    if iframe_content:
+                        try:
+                            # iframe 내부에 접근해서 author 정보 가져오기
+                            frame = iframe_content.content_frame()
+                            if frame:
+                                # 몇 초 대기 후 frame 내용 확인
+                                time.sleep(1)
+                                frame_url = frame.url
+                                # URL에서 secUid 파라미터 추출
+                                if 'secUid=' in frame_url:
+                                    secuid_match = re.search(r'secUid=([^&]+)', frame_url)
+                                    if secuid_match:
+                                        secuid_for_api = secuid_match.group(1)
+                        except:
+                            pass
+                    
+                    # 기본 비디오 데이터 생성
+                    video_data = {
+                        "rank": len(scraped_videos) + 1,
+                        "video_id": video_id,
+                        "tiktok_url": tiktok_url,
+                        "embed_url": embed_url,
+                        "thumbnail_url": f"https://p16-sign-sg.tiktokcdn.com/tos-alisg-p-0037/{video_id}~tplv-tiktokx-origin.image",
+                        "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "play_count": None,
+                        "author_info": {},
+                        "description": "",
+                        "hashtags": []
+                    }
+                    
+                    scraped_videos.append(video_data)
+                    
+                    print(f"  비디오 {len(scraped_videos)}: ID {video_id}")
+                    if secuid_for_api:
+                        print(f"    SecUID 발견: {secuid_for_api[:20]}...")
+                        collected_secuids.add(secuid_for_api)
+                    
+                    if len(scraped_videos) >= 30:
+                        break
+                
+                # 30개 달성했으면 종료
+                if len(scraped_videos) >= 30:
+                    print("목표 30개 달성!")
+                    break
+                
+                # View More 버튼 클릭
+                try:
+                    view_more = page.query_selector("text=\"View More\"")
+                    if view_more and view_more.is_visible():
+                        print("View More 클릭...")
+                        view_more.click()
+                        page.wait_for_timeout(3000)
+                    else:
+                        print("View More 버튼 없음")
+                        break
+                except:
+                    print("View More 클릭 실패")
+                    break
+                
+                click_count += 1
+            
+            # 수집된 secUID들로 API 호출해서 상세 정보 보강
+            print(f"\n=== 통계 정보 보강 ===")
+            print(f"수집된 SecUID: {len(collected_secuids)}개")
+            
+            # 몇 개의 샘플 secUID로 API 호출 테스트
+            sample_secuids = list(collected_secuids)[:5]  # 처음 5개만 테스트
+            
+            for i, secuid in enumerate(sample_secuids):
+                print(f"\nAPI 호출 {i+1}/{len(sample_secuids)}: {secuid[:20]}...")
+                
+                try:
+                    api_url = f"https://www.tiktok.com/api/recommend/embed_videos/?aid=1284&count=24&secUid={secuid}&lang=en"
+                    response = page.request.get(api_url)
+                    
+                    if response.status == 200:
+                        api_data = response.json()
+                        
+                        if 'items' in api_data and api_data['items']:
+                            for item in api_data['items']:
+                                item_id = item.get('id', '')
+                                
+                                # 해당 비디오를 scraped_videos에서 찾아서 업데이트
+                                for video in scraped_videos:
+                                    if video['video_id'] == item_id:
+                                        # 조회수 정보 추가
+                                        if 'stats' in item:
+                                            video['play_count'] = item['stats'].get('playCount')
+                                        
+                                        # 더 정확한 조회수 (statsV2)
+                                        if 'statsV2' in item:
+                                            video['play_count_v2'] = item['statsV2'].get('playCount')
+                                        
+                                        # 작성자 정보
+                                        if 'author' in item:
+                                            video['author_info'] = {
+                                                'username': item['author'].get('uniqueId', ''),
+                                                'sec_uid': item['author'].get('secUid', ''),
+                                                'avatar': item['author'].get('avatarThumb', '')
+                                            }
+                                        
+                                        # 설명과 해시태그
+                                        if 'desc' in item:
+                                            description = item['desc']
+                                            video['description'] = description
+                                            
+                                            # 해시태그 추출
+                                            hashtags = re.findall(r'#\w+', description)
+                                            video['hashtags'] = hashtags
+                                        
+                                        # 더 정확한 썸네일
+                                        if 'video' in item and 'cover' in item['video']:
+                                            video['thumbnail_url'] = item['video']['cover']
+                                        
+                                        print(f"    비디오 {video['rank']} 정보 업데이트 완료")
+                                        if video.get('play_count'):
+                                            print(f"      조회수: {video['play_count']:,}")
+                                        if video.get('hashtags'):
+                                            print(f"      해시태그: {video['hashtags'][:3]}")
+                                        break
+                        
+                        print(f"    API 호출 성공: {len(api_data.get('items', []))}개 아이템")
+                    else:
+                        print(f"    API 호출 실패: Status {response.status}")
+                
+                except Exception as e:
+                    print(f"    API 호출 중 오류: {e}")
+                
+                # API 호출 간 간격
+                time.sleep(1)
+            
+            # 최종 결과 저장
+            result = {
+                "scrape_info": {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "target_url": target_url,
+                    "total_videos_collected": len(scraped_videos),
+                    "view_more_clicks": click_count,
+                    "api_calls_made": len(sample_secuids),
+                    "videos_with_stats": sum(1 for v in scraped_videos if v.get('play_count'))
+                },
+                "videos": scraped_videos
+            }
+            
+            with open("tiktok_videos_with_stats.json", 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n=== 최종 수집 결과 ===")
+            print(f"총 수집된 비디오: {len(scraped_videos)}개")
+            print(f"통계 정보가 있는 비디오: {sum(1 for v in scraped_videos if v.get('play_count'))}개")
+            print(f"결과 저장: tiktok_videos_with_stats.json")
+            
+            # 수집된 비디오 요약 출력
+            if scraped_videos:
+                print(f"\n상위 5개 비디오 요약:")
+                for i, video in enumerate(scraped_videos[:5]):
+                    print(f"  {i+1}. ID: {video['video_id']}")
+                    if video.get('author_info', {}).get('username'):
+                        print(f"     작성자: @{video['author_info']['username']}")
+                    if video.get('play_count'):
+                        print(f"     조회수: {video['play_count']:,}")
+                    if video.get('hashtags'):
+                        print(f"     해시태그: {video['hashtags'][:3]}")
+            
+            print("\n10초 후 브라우저 종료...")
+            page.wait_for_timeout(10000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("TikTok 비디오 + 통계 정보 스크래핑 완료!")
+
+if __name__ == "__main__":
+    scrape_tiktok_videos_with_stats()

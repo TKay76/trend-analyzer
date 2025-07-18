@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - 정렬 드롭다운 구조 확인
+Hot, Likes, Comments, Shares 옵션들의 정확한 셀렉터 찾기
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def check_sort_dropdown():
+    """
+    정렬 드롭다운의 실제 구조 분석
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("정렬 드롭다운 구조 분석...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("\n페이지 로딩...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(8000)
+            
+            # 현재 페이지 HTML 분석
+            html_content = page.content()
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            print("\n1. 정렬 관련 요소 찾기...")
+            
+            # 정렬 버튼 찾기
+            sort_buttons = soup.select('span.ListFilter_sortWrapSelectLabel__VCgtO')
+            if sort_buttons:
+                print(f"정렬 버튼 발견: {len(sort_buttons)}개")
+                for i, btn in enumerate(sort_buttons):
+                    print(f"  버튼 {i+1}: {btn.get_text()}")
+            
+            # 전체 정렬 영역 분석
+            sort_areas = soup.select('[class*="ListFilter"], [class*="sort"], [class*="Sort"]')
+            print(f"정렬 관련 영역: {len(sort_areas)}개")
+            
+            print("\n2. 정렬 드롭다운 클릭 시도...")
+            
+            try:
+                # 정렬 드롭다운 클릭
+                sort_button = page.query_selector('span.ListFilter_sortWrapSelectLabel__VCgtO')
+                if sort_button:
+                    print("정렬 드롭다운 클릭!")
+                    sort_button.click()
+                    page.wait_for_timeout(3000)
+                    
+                    # 클릭 후 HTML 다시 분석
+                    html_after_click = page.content()
+                    soup_after = BeautifulSoup(html_after_click, 'html.parser')
+                    
+                    print("\n3. 드롭다운 열린 후 옵션들 찾기...")
+                    
+                    # 다양한 셀렉터로 옵션들 찾기
+                    option_selectors = [
+                        '[data-testid*="cc_rimless_select"]',
+                        '[class*="byted-list-item"]',
+                        '[class*="select-option"]',
+                        '[class*="dropdown"]',
+                        'div:contains("Likes")',
+                        'div:contains("Comments")',
+                        'div:contains("Shares")'
+                    ]
+                    
+                    found_options = {}
+                    
+                    for selector in option_selectors:
+                        try:
+                            if 'contains' in selector:
+                                # BeautifulSoup용 특별 처리
+                                if 'Likes' in selector:
+                                    options = soup_after.find_all('div', string='Likes')
+                                elif 'Comments' in selector:
+                                    options = soup_after.find_all('div', string='Comments')
+                                elif 'Shares' in selector:
+                                    options = soup_after.find_all('div', string='Shares')
+                                else:
+                                    options = []
+                            else:
+                                options = soup_after.select(selector)
+                            
+                            if options:
+                                found_options[selector] = len(options)
+                                print(f"  {selector}: {len(options)}개 발견")
+                                
+                                # 첫 번째 옵션의 상세 정보
+                                if options:
+                                    first_option = options[0]
+                                    print(f"    첫 번째 옵션:")
+                                    print(f"      텍스트: '{first_option.get_text().strip()}'")
+                                    print(f"      클래스: {first_option.get('class', [])}")
+                                    print(f"      data-testid: {first_option.get('data-testid', 'None')}")
+                                    
+                                    # 부모 요소 확인
+                                    parent = first_option.parent
+                                    if parent:
+                                        print(f"      부모 클래스: {parent.get('class', [])}")
+                        except Exception as e:
+                            print(f"  {selector}: 오류 - {e}")
+                    
+                    # 실제 Playwright로 옵션들 찾기
+                    print("\n4. Playwright로 실제 클릭 가능한 옵션들 찾기...")
+                    
+                    # 다양한 셀렉터로 실제 요소 찾기
+                    playwright_selectors = [
+                        'text="Likes"',
+                        'text="Comments"', 
+                        'text="Shares"',
+                        '[data-testid="cc_rimless_select_undefined_item_1"]',
+                        '[data-testid="cc_rimless_select_undefined_item_2"]',
+                        '[data-testid="cc_rimless_select_undefined_item_3"]',
+                        '.byted-list-item-inner-wrapper:has-text("Likes")',
+                        '.byted-list-item-inner-wrapper:has-text("Comments")',
+                        '.byted-list-item-inner-wrapper:has-text("Shares")'
+                    ]
+                    
+                    clickable_options = {}
+                    
+                    for selector in playwright_selectors:
+                        try:
+                            element = page.query_selector(selector)
+                            if element:
+                                is_visible = element.is_visible()
+                                text = element.text_content()
+                                clickable_options[selector] = {
+                                    'visible': is_visible,
+                                    'text': text
+                                }
+                                print(f"  {selector}: 발견! (visible: {is_visible}, text: '{text}')")
+                        except Exception as e:
+                            print(f"  {selector}: 오류 - {e}")
+                    
+                    # 결과 저장
+                    result = {
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "found_options_bs4": found_options,
+                        "clickable_options_playwright": clickable_options
+                    }
+                    
+                    with open("sort_dropdown_analysis.json", 'w', encoding='utf-8') as f:
+                        json.dump(result, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"\n분석 결과 저장: sort_dropdown_analysis.json")
+                    
+                    # 테스트: Likes 옵션 클릭 시도
+                    print("\n5. Likes 옵션 클릭 테스트...")
+                    
+                    likes_selectors = [
+                        'text="Likes"',
+                        '[data-testid="cc_rimless_select_undefined_item_1"]',
+                        '.byted-list-item-inner-wrapper:has-text("Likes")'
+                    ]
+                    
+                    for selector in likes_selectors:
+                        try:
+                            likes_option = page.query_selector(selector)
+                            if likes_option and likes_option.is_visible():
+                                print(f"  {selector}로 Likes 클릭 시도...")
+                                likes_option.click()
+                                page.wait_for_timeout(3000)
+                                
+                                # 클릭 후 URL이나 페이지 변화 확인
+                                current_url = page.url
+                                print(f"    클릭 후 URL: {current_url}")
+                                
+                                # 성공 표시 확인
+                                new_sort_label = page.query_selector('span.ListFilter_sortWrapSelectLabel__VCgtO')
+                                if new_sort_label:
+                                    new_text = new_sort_label.text_content()
+                                    print(f"    정렬 라벨 변화: '{new_text}'")
+                                    if 'likes' in new_text.lower():
+                                        print("    Likes 정렬 성공!")
+                                        break
+                                else:
+                                    print("    정렬 라벨을 찾을 수 없음")
+                        except Exception as e:
+                            print(f"    {selector} 클릭 실패: {e}")
+                
+                else:
+                    print("정렬 드롭다운 버튼을 찾을 수 없음")
+            
+            except Exception as e:
+                print(f"드롭다운 클릭 실패: {e}")
+            
+            print("\n30초 후 브라우저 종료...")
+            page.wait_for_timeout(30000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("정렬 드롭다운 분석 완료!")
+
+if __name__ == "__main__":
+    check_sort_dropdown()

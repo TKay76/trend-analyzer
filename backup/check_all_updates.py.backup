@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""
+전체 업데이트 기록 확인 스크립트
+"""
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+from src.database import database_manager as db
+
+def check_all_updates():
+    """모든 업데이트 기록 확인"""
+    
+    with db.get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        print("=" * 60)
+        print("📅 전체 UGC 업데이트 기록 확인")
+        print("=" * 60)
+        
+        # ugc_last_updated 필드가 있는 모든 데이터
+        cursor.execute("""
+            SELECT title, artist, tiktok_ugc_count, youtube_ugc_count, ugc_last_updated
+            FROM songs 
+            WHERE ugc_last_updated IS NOT NULL
+            ORDER BY ugc_last_updated DESC
+            LIMIT 20
+        """)
+        all_updates = cursor.fetchall()
+        
+        print(f"🔄 UGC 업데이트 기록 (최근 20개):")
+        for song in all_updates:
+            tiktok_count = f"{song[2]:,}" if song[2] else "미수집"
+            youtube_count = f"{song[3]:,}" if song[3] else "미수집"
+            print(f"   📱 {song[0]} - {song[1]}")
+            print(f"      TikTok: {tiktok_count}, YouTube: {youtube_count}")
+            print(f"      업데이트: {song[4]}")
+            print()
+        
+        # 날짜별 업데이트 통계
+        cursor.execute("""
+            SELECT DATE(ugc_last_updated) as update_date,
+                   COUNT(*) as total_updates,
+                   COUNT(CASE WHEN tiktok_ugc_count IS NOT NULL THEN 1 END) as tiktok_updates,
+                   COUNT(CASE WHEN youtube_ugc_count IS NOT NULL THEN 1 END) as youtube_updates
+            FROM songs 
+            WHERE ugc_last_updated IS NOT NULL
+            GROUP BY DATE(ugc_last_updated)
+            ORDER BY update_date DESC
+        """)
+        daily_stats = cursor.fetchall()
+        
+        print("📊 날짜별 업데이트 통계:")
+        for stat in daily_stats:
+            print(f"   📅 {stat[0]}: 총 {stat[1]}곡 (TikTok {stat[2]}곡, YouTube {stat[3]}곡)")
+        
+        print("=" * 60)
+
+if __name__ == "__main__":
+    check_all_updates()

@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""
+Crawl4AI 아이디어를 적용한 향상된 TikTok 스크래퍼
+- 스텔스 모드 시뮬레이션
+- 더 나은 대기 전략
+- 구조화된 데이터 추출
+"""
+
+import time
+import json
+import re
+from playwright.sync_api import sync_playwright
+from fake_useragent import UserAgent
+
+def extract_hashtags_from_text(text):
+    """텍스트에서 해시태그 추출"""
+    if not text:
+        return []
+    return re.findall(r'#\w+', text)
+
+def enhanced_tiktok_scraper():
+    """향상된 TikTok 스크래퍼"""
+    print("향상된 TikTok 스크래퍼 시작...")
+    
+    # 가짜 User-Agent 생성
+    ua = UserAgent()
+    user_agent = ua.random
+    
+    with sync_playwright() as p:
+        # 스텔스 모드 설정
+        browser = p.chromium.launch(
+            headless=False,
+            args=[
+                '--no-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
+            ]
+        )
+        
+        # 컨텍스트 생성 (더 나은 스텔스)
+        context = browser.new_context(
+            user_agent=user_agent,
+            viewport={'width': 1920, 'height': 1080},
+            extra_http_headers={
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+        )
+        
+        page = context.new_page()
+        
+        try:
+            # JavaScript injection으로 자동화 감지 방지
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+                
+                // 기타 자동화 감지 방지 코드
+                window.chrome = {
+                    runtime: {},
+                };
+            """)
+            
+            print("TikTok Creative Center 접속 중...")
+            
+            # 페이지 로딩 (더 나은 대기 전략)
+            response = page.goto(
+                "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+                wait_until="domcontentloaded",
+                timeout=30000
+            )
+            
+            print(f"응답 상태: {response.status}")
+            
+            if response.status != 200:
+                print(f"페이지 로드 실패: HTTP {response.status}")
+                return []
+            
+            # 페이지 완전 로딩 대기
+            print("페이지 로딩 대기 중...")
+            page.wait_for_timeout(5000)
+            
+            # 비디오 카드들이 로드될 때까지 대기
+            try:
+                page.wait_for_selector('.CommonGridLayoutDataList_cardWrapper__jkA9g', timeout=15000)
+                print("비디오 카드 발견!")
+            except:
+                print("비디오 카드를 찾을 수 없음. 페이지 구조 분석...")
+                
+                # 페이지의 모든 클래스 찾기
+                all_classes = page.evaluate("""
+                    Array.from(document.querySelectorAll('*'))
+                        .map(el => el.className)
+                        .filter(className => className && className.includes('card'))
+                        .slice(0, 10)
+                """)
+                print(f"카드 관련 클래스들: {all_classes}")
+            
+            # 비디오 카드 수집
+            video_cards = page.query_selector_all('.CommonGridLayoutDataList_cardWrapper__jkA9g')
+            print(f"발견된 초기 비디오 카드: {len(video_cards)}개")
+            
+            if len(video_cards) == 0:
+                # 대체 셀렉터 시도
+                alternative_selectors = [
+                    '[class*="card"]',
+                    '[class*="video"]',
+                    '[class*="item"]',
+                    'iframe[src*="/video/"]'
+                ]
+                
+                for selector in alternative_selectors:
+                    cards = page.query_selector_all(selector)
+                    if cards:
+                        print(f"대체 셀렉터 '{selector}'로 {len(cards)}개 요소 발견")
+                        video_cards = cards
+                        break
+            
+            # View More 버튼 클릭으로 더 많은 비디오 로드
+            for i in range(3):  # 최대 3번 시도
+                print(f"View More 버튼 클릭 시도 {i+1}...")
+                
+                view_more_buttons = page.query_selector_all('button, [role="button"]')
+                clicked = False
+                
+                for button in view_more_buttons:
+                    try:
+                        text = button.inner_text().lower()
+                        if any(keyword in text for keyword in ['view more', '더보기', 'load more', 'see more']):
+                            print(f"'{text}' 버튼 클릭")
+                            button.click()
+                            clicked = True
+                            page.wait_for_timeout(3000)  # 로딩 대기
+                            break
+                    except:
+                        continue
+                
+                if not clicked:
+                    print("View More 버튼을 찾을 수 없음")
+                    break
+                
+                # 새로운 카드 확인
+                new_cards = page.query_selector_all('.CommonGridLayoutDataList_cardWrapper__jkA9g')
+                print(f"클릭 후 비디오 카드: {len(new_cards)}개")
+                
+                if len(new_cards) > len(video_cards):
+                    video_cards = new_cards
+                    print(f"새로운 카드 {len(new_cards) - len(video_cards)}개 로드됨")
+                else:
+                    print("더 이상 새로운 카드가 로드되지 않음")
+                    break
+            
+            print(f"최종 비디오 카드: {len(video_cards)}개")
+            
+            # 각 비디오에서 데이터 추출
+            results = []
+            
+            for i, card in enumerate(video_cards[:30]):  # 최대 30개만
+                print(f"비디오 {i+1} 처리 중...")
+                
+                video_data = {
+                    'index': i + 1,
+                    'video_id': None,
+                    'video_url': None,
+                    'thumbnail': None,
+                    'hashtags': [],
+                    'description': '',
+                    'raw_text': ''
+                }
+                
+                try:
+                    # iframe에서 비디오 ID 추출
+                    iframe = card.query_selector('iframe')
+                    if iframe:
+                        src = iframe.get_attribute('src')
+                        if src and '/video/' in src:
+                            video_id = src.split('/video/')[-1].split('?')[0]
+                            video_data['video_id'] = video_id
+                            video_data['video_url'] = f"https://www.tiktok.com/@unknown/video/{video_id}"
+                            print(f"  비디오 ID: {video_id}")
+                    
+                    # 썸네일 이미지 추출
+                    img = card.query_selector('img')
+                    if img:
+                        thumbnail = img.get_attribute('src')
+                        video_data['thumbnail'] = thumbnail
+                        print(f"  썸네일: {thumbnail[:50]}...")
+                    
+                    # 카드의 모든 텍스트 추출
+                    card_text = card.inner_text()
+                    video_data['raw_text'] = card_text
+                    video_data['description'] = card_text.replace('\n', ' ').strip()
+                    
+                    # 해시태그 추출
+                    hashtags = extract_hashtags_from_text(card_text)
+                    video_data['hashtags'] = hashtags
+                    
+                    if hashtags:
+                        print(f"  해시태그: {hashtags}")
+                    
+                    # 카드 클릭해서 상세 정보 추출 시도
+                    try:
+                        card.click()
+                        page.wait_for_timeout(1000)
+                        
+                        # 페이지 전체에서 추가 해시태그 찾기
+                        page_text = page.inner_text('body')
+                        additional_hashtags = extract_hashtags_from_text(page_text)
+                        
+                        # 기존 해시태그와 합치기 (중복 제거)
+                        all_hashtags = list(set(hashtags + additional_hashtags))
+                        video_data['hashtags'] = all_hashtags
+                        
+                        if len(additional_hashtags) > len(hashtags):
+                            print(f"  추가 해시태그 발견: {additional_hashtags[:5]}")
+                        
+                        # ESC로 닫기
+                        page.keyboard.press('Escape')
+                        page.wait_for_timeout(500)
+                        
+                    except:
+                        pass  # 클릭 실패시 무시
+                    
+                except Exception as e:
+                    print(f"  오류: {str(e)[:50]}")
+                
+                results.append(video_data)
+                time.sleep(1)  # 요청 간격
+            
+            # 결과 저장
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"enhanced_tiktok_scraper_{timestamp}.json"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'timestamp': timestamp,
+                    'total_videos': len(results),
+                    'source_url': "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en",
+                    'scraper_version': "enhanced_v1.0",
+                    'videos': results
+                }, f, ensure_ascii=False, indent=2)
+            
+            # 결과 요약
+            total_hashtags = []
+            videos_with_hashtags = 0
+            
+            for video in results:
+                if video['hashtags']:
+                    videos_with_hashtags += 1
+                    total_hashtags.extend(video['hashtags'])
+            
+            unique_hashtags = list(set(total_hashtags))
+            
+            print(f"\n{'='*60}")
+            print("향상된 TikTok 스크래퍼 결과")
+            print(f"{'='*60}")
+            print(f"수집된 비디오: {len(results)}개")
+            print(f"해시태그가 있는 비디오: {videos_with_hashtags}개")
+            print(f"고유 해시태그: {len(unique_hashtags)}개")
+            print(f"결과 파일: {filename}")
+            
+            if unique_hashtags:
+                print(f"\n상위 해시태그:")
+                hashtag_counts = {}
+                for hashtag in total_hashtags:
+                    hashtag_counts[hashtag] = hashtag_counts.get(hashtag, 0) + 1
+                
+                top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                for hashtag, count in top_hashtags:
+                    print(f"  {hashtag}: {count}회")
+            
+            return results
+            
+        except Exception as e:
+            print(f"전체 오류: {e}")
+            return []
+        
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    results = enhanced_tiktok_scraper()
+    print(f"\n향상된 스크래퍼 완료: {len(results)}개 비디오 수집")

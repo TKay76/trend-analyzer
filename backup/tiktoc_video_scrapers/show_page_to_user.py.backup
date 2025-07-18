@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center 페이지를 사용자에게 보여주기
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+
+def show_page_to_user():
+    """
+    사용자에게 페이지를 보여주고 대기
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print(f"TikTok Creative Center 페이지를 열고 있습니다...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        try:
+            print("페이지 로딩 중...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            print("\n페이지가 열렸습니다!")
+            print("브라우저 창에서 페이지를 확인하세요.")
+            print("계속하려면 아무 키나 누르거나 충분히 확인한 후 Ctrl+C로 종료하세요.")
+            
+            # 사용자가 페이지를 볼 수 있도록 대기
+            input("Enter 키를 눌러 브라우저를 종료하세요...")
+            
+        except KeyboardInterrupt:
+            print("\n사용자가 종료했습니다.")
+        except Exception as e:
+            print(f"오류 발생: {e}")
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    show_page_to_user()

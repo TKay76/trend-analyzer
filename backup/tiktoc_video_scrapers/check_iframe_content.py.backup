@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""
+TikTok Creative Center - iframe 내부 확인 및 네트워크 요청 분석
+통계 정보가 다른 곳에 있는지 확인
+"""
+
+import time
+from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup
+import json
+
+def check_iframe_and_network():
+    """
+    iframe 내부와 네트워크 요청을 분석해서 통계 정보 찾기
+    """
+    target_url = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/pc/en"
+    
+    print("TikTok iframe 및 네트워크 분석...")
+    print(f"URL: {target_url}")
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page()
+        
+        # 네트워크 요청 로깅
+        requests_log = []
+        
+        def log_request(request):
+            if 'tiktok' in request.url or 'api' in request.url:
+                requests_log.append({
+                    "url": request.url,
+                    "method": request.method,
+                    "headers": dict(request.headers)
+                })
+        
+        def log_response(response):
+            if 'api' in response.url or 'stats' in response.url or 'metrics' in response.url:
+                print(f"API 응답: {response.url} - Status: {response.status}")
+        
+        page.on("request", log_request)
+        page.on("response", log_response)
+        
+        try:
+            print("\n페이지 로딩 및 네트워크 모니터링...")
+            page.goto(target_url, timeout=30000)
+            page.wait_for_timeout(5000)
+            
+            # 페이지 스크롤
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(3000)
+            
+            # 비디오 카드 대기
+            page.wait_for_selector("div.CommonGridLayoutDataList_cardWrapper__jkA9g", timeout=10000)
+            
+            print("첫 번째 비디오 iframe 분석...")
+            
+            # 첫 번째 비디오 iframe 찾기
+            iframe = page.query_selector("iframe[src*='tiktok.com/embed']")
+            if iframe:
+                iframe_src = iframe.get_attribute("src")
+                print(f"iframe URL: {iframe_src}")
+                
+                try:
+                    # iframe 내부 접근 시도
+                    frame = iframe.content_frame()
+                    if frame:
+                        print("iframe 내부 접근 성공!")
+                        frame_content = frame.content()
+                        frame_soup = BeautifulSoup(frame_content, 'html.parser')
+                        
+                        # iframe 내부 텍스트에서 숫자 찾기
+                        frame_text = frame_soup.get_text()
+                        print(f"iframe 내부 텍스트 (일부): {frame_text[:200]}...")
+                        
+                        # 숫자 패턴 찾기
+                        import re
+                        numbers = re.findall(r'\d+(?:,\d+)*(?:\.\d+)?[KMB]?', frame_text)
+                        if numbers:
+                            print(f"iframe에서 발견된 숫자들: {numbers[:10]}")
+                        
+                        # 특정 요소들 찾기
+                        stats_elements = frame_soup.select("[class*='count'], [class*='stat'], [class*='number']")
+                        if stats_elements:
+                            print(f"통계 관련 요소들: {len(stats_elements)}개")
+                            for elem in stats_elements[:3]:
+                                print(f"  - {elem.get_text().strip()}")
+                    else:
+                        print("iframe 내부 접근 실패 (CORS 제한 가능성)")
+                
+                except Exception as e:
+                    print(f"iframe 분석 중 오류: {e}")
+            
+            # 페이지의 JavaScript 변수나 숨겨진 데이터 확인
+            print("\n페이지 스크립트 데이터 분석...")
+            
+            # window 객체의 데이터 확인
+            try:
+                js_data = page.evaluate("""
+                    () => {
+                        const data = {};
+                        
+                        // 전역 변수들 확인
+                        if (window.__INITIAL_STATE__) data.initialState = window.__INITIAL_STATE__;
+                        if (window.__APP_DATA__) data.appData = window.__APP_DATA__;
+                        if (window.videoData) data.videoData = window.videoData;
+                        if (window.statsData) data.statsData = window.statsData;
+                        
+                        // 페이지의 JSON 데이터 블록들 찾기
+                        const scripts = document.querySelectorAll('script[type="application/json"]');
+                        data.jsonScripts = [];
+                        scripts.forEach((script, index) => {
+                            try {
+                                const content = JSON.parse(script.textContent);
+                                data.jsonScripts.push({index, content});
+                            } catch(e) {}
+                        });
+                        
+                        return data;
+                    }
+                """)
+                
+                if js_data:
+                    print(f"JavaScript 데이터 발견: {list(js_data.keys())}")
+                    if js_data.get('jsonScripts'):
+                        print(f"JSON 스크립트 블록: {len(js_data['jsonScripts'])}개")
+                
+            except Exception as e:
+                print(f"JavaScript 데이터 분석 실패: {e}")
+            
+            # View More 클릭 후 새로운 요청 확인
+            print("\nView More 클릭 후 네트워크 요청 분석...")
+            try:
+                view_more = page.query_selector("text=\"View More\"")
+                if view_more:
+                    print("View More 클릭...")
+                    view_more.click()
+                    page.wait_for_timeout(3000)
+            except:
+                print("View More 버튼 클릭 실패")
+            
+            # 네트워크 요청 분석
+            print(f"\n총 네트워크 요청: {len(requests_log)}개")
+            
+            # API 관련 요청들 필터링
+            api_requests = [req for req in requests_log if 'api' in req['url'].lower()]
+            stats_requests = [req for req in requests_log if any(keyword in req['url'].lower() 
+                             for keyword in ['stats', 'metrics', 'analytics', 'count', 'views'])]
+            
+            print(f"API 요청: {len(api_requests)}개")
+            print(f"통계 관련 요청: {len(stats_requests)}개")
+            
+            if api_requests:
+                print("\nAPI 요청들:")
+                for req in api_requests[:5]:
+                    print(f"  - {req['method']} {req['url'][:80]}...")
+            
+            if stats_requests:
+                print("\n통계 관련 요청들:")
+                for req in stats_requests[:5]:
+                    print(f"  - {req['method']} {req['url'][:80]}...")
+            
+            # 결과 저장
+            result = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "analysis": {
+                    "iframe_accessible": iframe is not None,
+                    "total_requests": len(requests_log),
+                    "api_requests": len(api_requests),
+                    "stats_requests": len(stats_requests)
+                },
+                "network_requests": {
+                    "api_requests": api_requests[:10],
+                    "stats_requests": stats_requests[:10],
+                    "all_tiktok_requests": [req for req in requests_log if 'tiktok' in req['url']][:10]
+                }
+            }
+            
+            with open("iframe_network_analysis.json", 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            
+            print(f"\n분석 결과 저장: iframe_network_analysis.json")
+            
+            print("\n15초 후 브라우저 종료...")
+            page.wait_for_timeout(15000)
+            
+        except Exception as e:
+            print(f"오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        finally:
+            browser.close()
+    
+    print("iframe 및 네트워크 분석 완료!")
+
+if __name__ == "__main__":
+    check_iframe_and_network()
